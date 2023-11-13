@@ -1,0 +1,132 @@
+---
+title: "Data Processing for Methods Manuscript"
+author: "Grace Smith-Vidaurre"
+date: "2023-09-04"
+output: html_document
+---
+
+Purpose: Use ABISSMAL functions to process and integrate data collected from 1 pair of zebra finches in summer 2023. This data will be used for figures in the ABISSMAL methods manuscript. In the code below, "IRBB" refers to infrared beam breakers and "RFID" refers to radio frequency identification.
+
+```{r libraries and paths}
+
+rm(list = ls())
+
+library(tidyverse)
+library(data.table)
+library(pbapply)
+library(tidyquant)
+
+orig_path <- "/media/gsvidaurre/Anodorhynchus/Data_Testing/Box_03_23Jun2023"
+data_path <- "/media/gsvidaurre/Anodorhynchus/ABISSMAL_MethodsPaper/Data_Sharing"
+
+code_path <- "/home/gsvidaurre/Desktop/GitHub_repos/Abissmal/R"
+code <- list.files(code_path, pattern = ".R$", full.names = TRUE)
+
+invisible(lapply(1:length(code), function(i){
+  source(code[i])
+}))
+
+```
+
+I copied the raw data to a local directory for data sharing with manuscript submission. All processed data will be written out to the same location. I did not copy the video files themselves since we used the spreadsheets of video recording events only in the accompanying manuscript.
+
+# Pre-processing
+
+Combine raw data across dates per sensor type.
+```{r combine raw data}
+
+combine_raw_data(sensors = c("IRBB", "RFID", "Video", "Temp"), path = data_path, data_dir = "Data", out_dir = "raw_combined", tz = "America/New York", POSIXct_format = "%Y-%m-%d %H:%M:%OS")
+
+```
+
+Find RFID and beam breaker perching events.
+```{r find perching events}
+
+detect_perching_events(file_nm = "combined_raw_data_RFID.csv", threshold = 2, run_length = 2, sensor_id_col_nm = "sensor_id", timestamps_col_nm = "timestamp_ms", PIT_tag_col_nm = "PIT_tag_ID", rfid_label = "RFID", outer_irbb_label = NULL, inner_irbb_label = NULL, general_metadata_cols = c("chamber_id", "sensor_id"), path = data_path, data_dir = "raw_combined", out_dir = "processed", out_file_prefix = "perching_events", tz = "America/New York", POSIXct_format = "%Y-%m-%d %H:%M:%OS")
+
+detect_perching_events(file_nm = "combined_raw_data_IRBB.csv", threshold = 2, run_length = 2, sensor_id_col_nm = "sensor_id", timestamps_col_nm = "timestamp_ms", PIT_tag_col_nm = NULL, rfid_label = NULL, outer_irbb_label = "Outer Beam Breaker", inner_irbb_label = "Inner Beam Breaker", general_metadata_cols = c("chamber_id", "sensor_id"), path = data_path, data_dir = "raw_combined", out_dir = "processed", out_file_prefix = "perching_events", tz = "America/New York", POSIXct_format = "%Y-%m-%d %H:%M:%OS")
+
+```
+
+Pre-process the RFID, beam breaker, and video data.
+```{r preprocess data}
+
+# Performed pre-processing with a threshold of 2 seconds for RFID because I removed the timestamp difference rounding
+# The PIT tag IDs specified in `drop_tag` were tags I used for testing the RFID antenna and were not used to mark birds
+preprocess_detections(sensor = "RFID", timestamps_col_nm = "timestamp_ms", group_col_nm = "PIT_tag_ID", pixel_col_nm = NULL, mode = "thin", thin_threshold = 2, pixel_threshold = NULL, drop_tag = c("01-10-3F-84-FC", "01-10-16-B8-7F"), path = data_path, data_dir = "raw_combined", out_dir = "processed", tz = "America/New York", POSIXct_format = "%Y-%m-%d %H:%M:%OS")
+
+# Used thinning with a threshold of 2 seconds for beam breakers as well
+preprocess_detections(sensor = "IRBB", timestamps_col_nm = "timestamp_ms", group_col_nm = "sensor_id", pixel_col_nm = NULL, mode = "thin", thin_threshold = 2, pixel_threshold = NULL, drop_tag = NULL, path = data_path, data_dir = "raw_combined", out_dir = "processed", tz = "America/New York", POSIXct_format = "%Y-%m-%d %H:%M:%OS")
+
+# Used a pixel threshold of 1000 for video data. Since we used 9000 pixels as the sensitivity threshold for motion detection, this filtering threshold will not drop any data
+preprocess_detections(sensor = "Video", timestamps_col_nm = "timestamp_ms", group_col_nm = NULL, pixel_col_nm = "total_pixels_motionTrigger", mode = NULL, thin_threshold = NULL, pixel_threshold = 1000, drop_tag = NULL, path = data_path, data_dir = "raw_combined", out_dir = "processed", tz = "America/New York", POSIXct_format = "%Y-%m-%d %H:%M:%OS")
+
+```
+
+# Integration
+
+### All 3 movement sensor types
+
+Find clusters of detections across all 3 movement sensor that represent movement events per.
+```{r find detection clusters for 3 sensor types}
+
+# Using camera_label = "Camera" again here since that's was carried through from the raw data
+# The run length needs to be set to 1 in order to correctly detect detection clusters of length 2
+detect_clusters(file_nms = c("pre_processed_data_RFID.csv", "pre_processed_data_IRBB.csv", "pre_processed_data_Video.csv"), threshold = 2, run_length = 1, sensor_id_col_nm = "sensor_id", timestamps_col_nm = "timestamp_ms", PIT_tag_col_nm = "PIT_tag_ID", rfid_label = "RFID", camera_label = "Camera", preproc_metadata_col_nms = c("thin_threshold_s", "pixel_threshold", "data_stage", "date_pre_processed"), general_metadata_col_nms = c("chamber_id", "year", "month", "day"), video_metadata_col_nms = c("total_pixels_motionTrigger", "video_file_name"), path = data_path, data_dir = "processed", out_dir = "processed", out_file_nm = "detection_clusters.csv", tz = "America/New York", POSIXct_format = "%Y-%m-%d %H:%M:%OS")
+  
+```
+
+Score detection clusters to make inferences about behavioral events associated with these movements.
+```{r score detection clusters for 3 sensor types}
+
+score_clusters(file_nm = "detection_clusters.csv", rfid_label = "RFID", camera_label = "Camera", outer_irbb_label = "Outer Beam Breaker", inner_irbb_label = "Inner Beam Breaker", video_metadata_col_nms = c("total_pixels_motionTrigger", "video_file_name"), integrate_perching = TRUE, perching_dataset = "RFID-IRBB", perching_prefix = "perching_events_", sensor_id_col_nm = "sensor_id", PIT_tag_col_nm = "PIT_tag_ID", pixel_col_nm = "total_pixels_motionTrigger", video_width = 1280, video_height = 720, integrate_preproc_video = TRUE, video_file_nm = "pre_processed_data_Video.csv", timestamps_col_nm = "timestamp_ms", path = data_path, data_dir = "processed", out_dir = "processed", out_file_nm = "scored_detectionClusters.csv", tz = "America/New York", POSIXct_format = "%Y-%m-%d %H:%M:%OS")
+
+```
+
+### RFID and beam breakers only
+
+Find clusters of detections by RFID and beam breakers that represent movement events.
+```{r find detection clusters for RFID and beam breakers}
+
+detect_clusters(file_nms = c("pre_processed_data_RFID.csv", "pre_processed_data_IRBB.csv"), threshold = 2, run_length = 1, sensor_id_col_nm = "sensor_id", timestamps_col_nm = "timestamp_ms", PIT_tag_col_nm = "PIT_tag_ID", rfid_label = "RFID", camera_label = NULL, preproc_metadata_col_nms = c("thin_threshold_s", "data_stage", "date_pre_processed"), general_metadata_col_nms = c("chamber_id", "year", "month", "day"), video_metadata_col_nms = NULL, path = data_path, data_dir = "processed", out_dir = "processed", out_file_nm = "detection_clusters_RFID-IRBB.csv", tz = "America/New York", POSIXct_format = "%Y-%m-%d %H:%M:%OS")
+
+```
+
+Score detection clusters to make inferences about behavioral events associated with these movements.
+```{r score detection clusters for RFID and beam breakers}
+
+score_clusters(file_nm = "detection_clusters_RFID-IRBB.csv", rfid_label = "RFID", camera_label = NULL, outer_irbb_label = "Outer Beam Breaker", inner_irbb_label = "Inner Beam Breaker", video_metadata_col_nms = NULL, integrate_perching = TRUE, perching_dataset = "RFID-IRBB", perching_prefix = "perching_events_", sensor_id_col_nm = "sensor_id", PIT_tag_col_nm = "PIT_tag_ID", pixel_col_nm = NULL, video_width = NULL, video_height = NULL, integrate_preproc_video = FALSE, video_file_nm = NULL, timestamps_col_nm = NULL, path = data_path, data_dir = "processed", out_dir = "processed", out_file_nm = "scored_detectionClusters_RFID-IRBB.csv", tz = "America/New York", POSIXct_format = "%Y-%m-%d %H:%M:%OS")
+
+```
+
+# RFID and Video
+
+Find clusters of detections by RFID and video that represent movement events.
+```{r find detection clusters for RFID and video}
+
+detect_clusters(file_nms = c("pre_processed_data_RFID.csv", "pre_processed_data_Video.csv"), threshold = 2, run_length = 1, sensor_id_col_nm = "sensor_id", timestamps_col_nm = "timestamp_ms", PIT_tag_col_nm = "PIT_tag_ID", rfid_label = "RFID", camera_label = "Camera", preproc_metadata_col_nms = c("thin_threshold_s", "pixel_threshold", "data_stage", "date_pre_processed"), general_metadata_col_nms = c("chamber_id", "year", "month", "day"), video_metadata_col_nms = c("total_pixels_motionTrigger", "video_file_name"), path = data_path, data_dir = "processed", out_dir = "processed", out_file_nm = "detection_clusters_RFID-Video.csv", tz = "America/New York", POSIXct_format = "%Y-%m-%d %H:%M:%OS")
+
+```
+
+Score detection clusters to make inferences about behavioral events associated with these movements.
+```{r score detection clusters for RFID and video}
+
+score_clusters(file_nm = "detection_clusters_RFID-Video.csv", rfid_label = "RFID", camera_label = "Camera", outer_irbb_label = NULL, inner_irbb_label = NULL, video_metadata_col_nms = c("total_pixels_motionTrigger", "video_file_name"), integrate_perching = TRUE, perching_dataset = "RFID-IRBB", perching_prefix = "perching_events_", sensor_id_col_nm = "sensor_id", PIT_tag_col_nm = "PIT_tag_ID", pixel_col_nm = "total_pixels_motionTrigger", video_width = 1280, video_height = 720, integrate_preproc_video = TRUE, video_file_nm = "pre_processed_data_Video.csv", timestamps_col_nm = "timestamp_ms", path = data_path, data_dir = "processed", out_dir = "processed", out_file_nm = "scored_detectionClusters_RFID-Video.csv", tz = "America/New York", POSIXct_format = "%Y-%m-%d %H:%M:%OS")
+
+```
+
+### Beam breakers and Video
+
+Find clusters of detections by beam breakers and video that represent movement events.
+```{r find detection clusters for beam breakers and video}
+
+detect_clusters(file_nms = c("pre_processed_data_IRBB.csv", "pre_processed_data_Video.csv"), threshold = 2, run_length = 1, sensor_id_col_nm = "sensor_id", timestamps_col_nm = "timestamp_ms", PIT_tag_col_nm = NULL, rfid_label = NULL, camera_label = "Camera", preproc_metadata_col_nms = c("thin_threshold_s", "pixel_threshold", "data_stage", "date_pre_processed"), general_metadata_col_nms = c("chamber_id", "year", "month", "day"), video_metadata_col_nms = c("total_pixels_motionTrigger", "video_file_name"), path = data_path, data_dir = "processed", out_dir = "processed", out_file_nm = "detection_clusters_IRBB-Video.csv", tz = "America/New York", POSIXct_format = "%Y-%m-%d %H:%M:%OS")
+
+```
+
+Score detection clusters to make inferences about behavioral events associated with these movements.
+```{r score detection clusters for beam breakers and video}
+
+score_clusters(file_nm = "detection_clusters_IRBB-Video.csv", rfid_label = NULL, camera_label = "Camera", outer_irbb_label = "Outer Beam Breaker", inner_irbb_label = "Inner Beam Breaker", video_metadata_col_nms = c("total_pixels_motionTrigger", "video_file_name"), integrate_perching = TRUE, perching_dataset = "RFID-IRBB", perching_prefix = "perching_events_", sensor_id_col_nm = "sensor_id", PIT_tag_col_nm = "PIT_tag_ID", pixel_col_nm = "total_pixels_motionTrigger", video_width = 1280, video_height = 720, integrate_preproc_video = TRUE, video_file_nm = "pre_processed_data_Video.csv", timestamps_col_nm = "timestamp_ms", path = data_path, data_dir = "processed", out_dir = "processed", out_file_nm = "scored_detectionClusters_IRBB-Video.csv", tz = "America/New York", POSIXct_format = "%Y-%m-%d %H:%M:%OS")
+
+```

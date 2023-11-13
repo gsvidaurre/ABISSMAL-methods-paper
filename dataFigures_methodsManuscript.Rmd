@@ -1,0 +1,1415 @@
+---
+title: "Data figures for ABISSMAL methods manuscript"
+author: "Grace Smith-Vidaurre"
+date: "2023-09-06"
+output: html_document
+---
+
+Purpose: Make data figures for the ABISSMAL methods mansucript using the pre-processed and integrated data collected from 1 pair of zebra finches in summer 2023. These figures were used downstream in Inkscape to add additional text and arrange some plots into multi-paneled figures.
+
+```{r libraries and paths}
+
+rm(list = ls())
+
+library(tidyverse)
+library(data.table)
+library(pbapply)
+library(tidyquant)
+
+path <- "/media/gsvidaurre/Anodorhynchus/ABISSMAL_MethodsPaper/Data_Sharing"
+figure_path <- "/home/gsvidaurre/Desktop/MANUSCRIPTS/Prep/ABISSMAL_MethodsPaper/Figures/Image_Files"
+
+code_path <- "/home/gsvidaurre/Desktop/GitHub_repos/Abissmal/R"
+code <- list.files(code_path, pattern = ".R$", full.names = TRUE)
+
+invisible(lapply(1:length(code), function(i){
+  source(code[i])
+}))
+
+```
+
+Information about dates for 3 behavioral epochs: egg-laying, eggs hatching, chicks fledging. I validated these dates by watching videos (notes on my end are in early-life-experience-vocal-learning/notes_behavioralEpochs_container03.Rmd).
+```{r behavioral epochs}
+
+# Make a data frame with the start and end date of each behavioral epoch that will be used for some of the figures below
+epochs <- data.frame(
+  
+  start_date = c("7-4", "7-19", "8-6"),
+  end_date = c("7-8", "7-22", "8-7"),
+  epoch = c("Eggs laid", "Eggs hatched", "Chicks fledged")
+  
+)
+
+epochs
+
+```
+
+Read in the combined raw data for each sensor alone. I filtered all of these datasets by the first day that a bird's PIT tag was detected in the pre-processed datasets (any dates before 6-28, see below).
+```{r read in pre-processed data}
+
+rfid_raw <- read.csv(file.path(path, "raw_combined", "combined_raw_data_RFID.csv")) %>% dplyr::mutate(tmp = paste(month, day, sep = "-"))
+glimpse(rfid_raw)
+
+unique(rfid_raw$tmp)
+
+rfid_raw <- rfid_raw %>% 
+  dplyr::filter(!tmp %in% c("6-23", "6-26")) %>% 
+  dplyr::select(-c(tmp))
+
+irbb_raw <- read.csv(file.path(path, "raw_combined", "combined_raw_data_IRBB.csv")) %>%
+  dplyr::mutate(tmp = paste(month, day, sep = "-"))
+glimpse(irbb_raw)
+
+unique(irbb_raw$tmp)
+
+irbb_raw <- irbb_raw %>% 
+  dplyr::filter(!tmp %in% c("6-23", "6-26")) %>% 
+  dplyr::select(-c(tmp))
+
+glimpse(irbb_raw)
+
+video_raw <- read.csv(file.path(path, "raw_combined", "combined_raw_data_Video.csv")) %>% 
+  dplyr::mutate(tmp = paste(month, day, sep = "-"))
+glimpse(video_raw)
+
+unique(video_raw$tmp)
+
+video_raw <- video_raw %>% 
+  dplyr::filter(!tmp %in% c("6-23", "6-24", "6-25", "6-26", "6-27")) %>% 
+  dplyr::select(-c(tmp))
+
+glimpse(video_raw)
+
+```
+
+Read in the pre-processed data for each sensor alone. I filtered all of these datasets by the first day that a bird's PIT tag was detected.
+```{r read in pre-processed data}
+
+rfid_pp <- read.csv(file.path(path, "processed", "pre_processed_data_RFID.csv"))
+glimpse(rfid_pp)
+
+rfid_pp %>% 
+  slice(1) %>% 
+  dplyr::select(month, day)
+
+# month day
+# 1     6  28
+
+irbb_pp <- read.csv(file.path(path, "processed", "pre_processed_data_IRBB.csv")) %>% 
+  dplyr::mutate(tmp = paste(month, day, sep = "-"))
+glimpse(irbb_pp)
+
+unique(irbb_pp$tmp)
+
+irbb_pp <- irbb_pp %>% 
+  dplyr::filter(!tmp %in% c("6-23", "6-26")) %>% 
+  dplyr::select(-c(tmp))
+
+glimpse(irbb_pp)
+
+video_pp <- read.csv(file.path(path, "processed", "pre_processed_data_Video.csv")) %>% 
+  dplyr::mutate(tmp = paste(month, day, sep = "-"))
+glimpse(video_pp)
+
+unique(video_pp$tmp)
+
+video_pp <- video_pp %>% 
+  dplyr::filter(!tmp %in% c("6-23", "6-24", "6-25", "6-26", "6-27")) %>% 
+  dplyr::select(-c(tmp))
+
+glimpse(video_pp)
+
+```
+
+Read in the scored detection clusters dataset representing the integration across either all 3 movement sensors, RFID and IRBB, RFID and Video, and IRBB and video.
+```{r read in the integrated datasets}
+
+# All 3 sensors with RFID and IRBB perching events
+# The first timestamp in the RFID dataset: "2023-06-28 17:05:42.552215"
+integrated_all <- read.csv(file.path(path, "processed", "scored_detectionClusters.csv")) %>%  # Make sure that the timestamps are in the right format
+  dplyr::mutate(
+    start = as.POSIXct(format(as.POSIXct(start, tz = "America/New York"), "%Y-%m-%d %H:%M:%OS6")),
+    end = as.POSIXct(format(as.POSIXct(end, tz = "America/New York"), "%Y-%m-%d %H:%M:%OS6"))
+  ) %>% 
+  dplyr::filter(
+    start >= as.POSIXct(format(as.POSIXct("2023-06-28 00:00:00", tz = "America/New York"), "%Y-%m-%d %H:%M:%OS6"))
+  )
+
+glimpse(integrated_all)
+
+
+# RFID and IRBB with RFID and IRBB perching events
+integrated_rfid_irbb <- read.csv(file.path(path, "processed", "scored_detectionClusters_RFID-IRBB.csv")) %>%  # Make sure that the timestamps are in the right format
+  dplyr::mutate(
+    start = as.POSIXct(format(as.POSIXct(start, tz = "America/New York"), "%Y-%m-%d %H:%M:%OS6")),
+    end = as.POSIXct(format(as.POSIXct(end, tz = "America/New York"), "%Y-%m-%d %H:%M:%OS6"))
+  ) %>% 
+  dplyr::filter(
+    start >= as.POSIXct(format(as.POSIXct("2023-06-28 00:00:00", tz = "America/New York"), "%Y-%m-%d %H:%M:%OS6"))
+  )
+
+glimpse(integrated_rfid_irbb)
+
+
+# RFID and Video with RFID and IRBB perching events
+integrated_rfid_video <- read.csv(file.path(path, "processed", "scored_detectionClusters_RFID-Video.csv")) %>%  # Make sure that the timestamps are in the right format
+  dplyr::mutate(
+    start = as.POSIXct(format(as.POSIXct(start, tz = "America/New York"), "%Y-%m-%d %H:%M:%OS6")),
+    end = as.POSIXct(format(as.POSIXct(end, tz = "America/New York"), "%Y-%m-%d %H:%M:%OS6"))
+  ) %>% 
+  dplyr::filter(
+    start >= as.POSIXct(format(as.POSIXct("2023-06-28 00:00:00", tz = "America/New York"), "%Y-%m-%d %H:%M:%OS6"))
+  )
+
+glimpse(integrated_rfid_video)
+
+
+# IRBB and video with RFID and IRBB perching events
+integrated_irbb_video <- read.csv(file.path(path, "processed", "scored_detectionClusters_IRBB-Video.csv")) %>%  # Make sure that the timestamps are in the right format
+  dplyr::mutate(
+    start = as.POSIXct(format(as.POSIXct(start, tz = "America/New York"), "%Y-%m-%d %H:%M:%OS6")),
+    end = as.POSIXct(format(as.POSIXct(end, tz = "America/New York"), "%Y-%m-%d %H:%M:%OS6"))
+  ) %>% 
+  dplyr::filter(
+    start >= as.POSIXct(format(as.POSIXct("2023-06-28 00:00:00", tz = "America/New York"), "%Y-%m-%d %H:%M:%OS6"))
+  )
+
+glimpse(integrated_irbb_video)
+
+```
+
+Figure 3: Raw data, barcode style.
+
+Make a plot of Day 4 through Day 7 to catch both daytime and nighttime activity.
+```{r barcode figure for raw data}
+
+# All 3 sensors with RFID and IRBB perching events
+# The first timestamp in the RFID dataset: "2023-06-28 17:05:42.552215"
+raw_all <- rfid_raw %>%  # Make sure that the timestamps are in the right format
+  dplyr::mutate(
+    timestamp_ms = as.POSIXct(format(as.POSIXct(timestamp_ms, tz = "America/New York"), "%Y-%m-%d %H:%M:%OS6"))
+  ) %>% 
+  dplyr::arrange(timestamp_ms) %>%
+  dplyr::mutate(
+    date = paste(month, day, sep = "-")
+  ) %>% 
+  dplyr::select(sensor_id, date, timestamp_ms) %>% 
+  bind_rows(
+    irbb_raw %>%  # Make sure that the timestamps are in the right format
+      dplyr::mutate(
+        timestamp_ms = as.POSIXct(format(as.POSIXct(timestamp_ms, tz = "America/New York"), "%Y-%m-%d %H:%M:%OS6"))
+      ) %>% 
+      dplyr::arrange(timestamp_ms) %>%
+      dplyr::mutate(
+        date = paste(month, day, sep = "-")
+      ) %>% 
+      dplyr::select(sensor_id, date, timestamp_ms)
+  ) %>% 
+  bind_rows(
+    video_raw %>%  # Make sure that the timestamps are in the right format
+      dplyr::mutate(
+        timestamp_ms = as.POSIXct(format(as.POSIXct(timestamp_ms, tz = "America/New York"), "%Y-%m-%d %H:%M:%OS6"))
+      ) %>% 
+      dplyr::arrange(timestamp_ms) %>%
+      dplyr::mutate(
+        date = paste(month, day, sep = "-")
+      ) %>% 
+      dplyr::select(sensor_id, date, timestamp_ms)
+  ) %>% 
+  dplyr::mutate(
+    sensor_id = factor(sensor_id, levels = c("Outer Beam Breaker", "RFID", "Inner Beam Breaker", "Camera")),
+    timestamp = as.POSIXct(strptime(format(as.POSIXct(timestamp_ms), "%H:%M:%S"), format="%H:%M:%S"))
+  )
+
+glimpse(raw_all)
+
+# Do the date recoding  
+dts_old <- raw_all %>%
+  pull(date) %>%
+  unique()
+
+# Check the ordering of these dates very carefully
+dts_old
+
+dts_new <- paste("D", seq(1, length(dts_old), 1), sep = "")
+dts_new  
+
+dts <- data.frame(
+  old_date = dts_old,
+  new_date = dts_new
+)
+dts
+
+# Recode dates
+all_new_dts <- unlist(lapply(1:nrow(raw_all), function(i){
+  
+  dts$new_date[grep(paste("^", raw_all$date[i], "$", sep = ""), dts$old_date)]
+  
+}))
+
+unique(all_new_dts)
+
+if(length(all_new_dts) == nrow(raw_all)){
+  
+  raw_all$new_date <- all_new_dts
+  
+  raw_all <- raw_all %>%
+    # Update the date ordering
+    dplyr::mutate(
+      new_date = factor(new_date, levels = dts_new)
+    )
+  
+}
+
+glimpse(raw_all)
+
+# Make sparser date labeling
+date_labels <- raw_all %>% 
+  group_by(new_date) %>% 
+  dplyr::summarise(n = n()) %>% 
+  ungroup() %>% 
+  dplyr::mutate(
+    date_labels = as.character(new_date)
+  ) %>% 
+  dplyr::mutate(
+    date_labels = ifelse(date_labels %in% paste("D", seq(1, length(dts_old), 2), sep = ""), date_labels, "")
+  ) %>% 
+  pull(date_labels)
+
+date_labels
+
+# These are all in the same levels as the factor levels above
+raw_all %>%
+  pull(sensor_id) %>%
+  unique()
+
+levels(raw_all$sensor_id)
+
+# These hexcodes should the same used for other figures made in Inkscape
+# #00147a is outer beam breakers
+# #a40000 is RFID
+# #5f79ff is inner beam breakers
+# #dfae04 is Camera
+cols <- c("#00147a", "#a40000", "#5f79ff", "#dfae04")
+
+# Set x-axis limits that will be used with scale_x_datetime
+# The time labels appear correctly when I add one and subtract 1 to get the midnight values, but not when I specify them outright
+x_lims <- c(
+  as.POSIXct(strptime(format(as.POSIXct(paste(Sys.Date(), "00:00:01 EDT")), "%H:%M:%S"), format = "%H:%M:%S")) - 1,
+  as.POSIXct(strptime(format(as.POSIXct(paste(Sys.Date(), "23:59:59 EDT")), "%H:%M:%S"), format = "%H:%M:%S")) + 1
+)
+
+# Make a data frame of year coordinates for adding rectangles to shade the nighttime hours
+# Birds are on a 12:12 h light:dark cycle that starts at 6:30 with light, and turns off for dark at 18:30
+light_lims <- c(
+  as.POSIXct(strptime(format(as.POSIXct(paste(Sys.Date(), "06:30:00 EDT")), "%H:%M:%S"), format = "%H:%M:%S")),
+  as.POSIXct(strptime(format(as.POSIXct(paste(Sys.Date(), "18:30:00 EDT")), "%H:%M:%S"), format = "%H:%M:%S"))
+)
+
+rect_df <- data.frame(
+  new_date = levels(raw_all$new_date)
+) %>%
+  # Set the nocturnal period from 00:04:00 to 06:30:00 on the left of the plot
+  dplyr::mutate(
+    time_xmin = x_lims[1],
+    time_xmax = light_lims[1]
+  ) %>%
+  # Set the nocturnal period from 18:30:00 to 00:00:00 on the right of the plot
+  bind_rows(
+    data.frame(
+      new_date = levels(raw_all$new_date)
+    ) %>%
+      dplyr::mutate(
+        time_xmin = light_lims[2],
+        time_xmax = x_lims[2]
+      )
+  ) %>% 
+  dplyr::mutate(
+    new_date = factor(new_date, levels = levels(raw_all$new_date))
+  )
+
+levels(rect_df$new_date)
+
+rect_df
+
+# Filter by the days of interest (see above)
+days <- paste("D", seq(4, 7, 1), sep = "")
+days
+
+raw_all2 <- raw_all %>% 
+  dplyr::filter(new_date %in% days) %>% 
+  droplevels()
+
+glimpse(raw_all2)
+
+rect_df2 <- rect_df %>% 
+  dplyr::filter(new_date %in% days) %>% 
+  droplevels()
+
+glimpse(rect_df2)
+
+y_max <- 2
+
+ggplot() +
+  
+  # Add vertical lines for activities by sensor ID
+  geom_segment(
+    data = raw_all2 %>% 
+      dplyr::filter(sensor_id == "Camera"),
+    aes(x = timestamp, xend = timestamp, y = 0, yend = y_max/4),
+    color = cols[4],
+    linewidth = 0.3
+  ) +
+  
+  geom_segment(
+    data = raw_all2 %>% 
+      dplyr::filter(sensor_id == "Inner Beam Breaker"),
+    aes(x = timestamp, xend = timestamp, y = y_max/4, yend = (y_max/4) * 2),
+    color = cols[3],
+    linewidth = 0.3
+  ) +
+  
+  geom_segment(
+    data = raw_all2 %>% 
+      dplyr::filter(sensor_id == "RFID"),
+    aes(x = timestamp, xend = timestamp, y = (y_max/4) * 2, yend = (y_max/4) * 3),
+    color = cols[2],
+    linewidth = 0.3
+  ) +
+  
+  geom_segment(
+    data = raw_all2 %>% 
+      dplyr::filter(sensor_id == "Outer Beam Breaker"),
+    aes(x = timestamp, xend = timestamp, y = (y_max/4) * 3, yend = y_max),
+    color = cols[1],
+    linewidth = 0.3
+  ) +
+  
+  # I removed switch = "y" because it's possible to rotate strip lables horizontally when they're on the right
+  facet_grid(rows = vars(new_date)) +
+  
+  # Add shaded rectangles for the nocturnal periods
+  geom_rect(data = rect_df2, aes(xmin = time_xmin, xmax = time_xmax, ymin = -Inf, ymax = Inf), color = alpha("black", 0), fill = alpha("black", 0.08), inherit.aes = FALSE) +
+  
+  scale_x_datetime(
+    breaks = seq(x_lims[1], x_lims[2], "1 hour"),
+    date_labels = "%H:%M",
+    expand = c(0, 0),
+    limits = x_lims
+  ) +
+
+  scale_y_continuous(limits = c(0, y_max)) +
+  guides(color = "none") +
+  theme_bw() +
+  ylab("") +
+  xlab("") +
+  theme(
+    axis.ticks.y = element_blank(),
+    axis.text.y = element_blank(),
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    axis.text.x = element_text(size = 7, angle = 90, vjust = 0.5, hjust = 0.5, color = "black"),
+    strip.text.y = element_text(size = 7, face = "bold", angle = 0),
+    strip.background = element_rect(fill = "white"),
+    legend.position = "top",
+    axis.ticks = element_line(linewidth = 0.25)
+  )
+
+ggsave(file.path(figure_path, "barcode_rawData_container-03.tiff"), units = "in", width = 7.1, height = 2.8, dpi = 600)
+
+```
+
+
+Processed and integrated data figure (Figure 5):
+
+A) Make a graphic comparing the full amount of all activities together across the pre-processed datasets.
+```{r pre-processed data figure panel A}
+
+gg_df <- rfid_pp %>%
+  dplyr::arrange(timestamp_ms) %>%
+  dplyr::mutate(
+    date = paste(month, day, sep = "-"),
+    timestamp = as_datetime(hms(format(as.POSIXct(timestamp_ms, tz = "America/New York"), "%H:%M:%S"))),
+    type = "rfid"
+  ) %>%
+  dplyr::select(date, timestamp, type) %>% 
+  # Add the pre-processed beam breaker data
+  bind_rows(
+    irbb_pp %>%
+      dplyr::arrange(timestamp_ms) %>%
+      dplyr::mutate(
+        date = paste(month, day, sep = "-"),
+        timestamp = as_datetime(hms(format(as.POSIXct(timestamp_ms, tz = "America/New York"), "%H:%M:%S"))),
+        type = sensor_id,
+        type = ifelse(type == "Outer Beam Breaker", "outer beam breakers", "inner beam breakers")
+      ) %>%
+      dplyr::select(date, timestamp, type)
+  ) %>% 
+  # Add the pre-processed video data
+  bind_rows(
+    video_pp %>%
+      dplyr::arrange(timestamp_ms) %>%
+      dplyr::mutate(
+        date = paste(month, day, sep = "-"),
+        timestamp = as_datetime(hms(format(as.POSIXct(timestamp_ms, tz = "America/New York"), "%H:%M:%S"))),
+        type = "video"
+      ) %>%
+      dplyr::select(date, timestamp, type)
+  ) %>% 
+  dplyr::mutate(
+    type = factor(type, levels = c("outer beam breakers", "rfid", "inner beam breakers", "video"))
+  )
+
+dts_old <- gg_df %>% 
+  pull(date) %>% 
+  unique()
+
+# Check these carefully to ensure the dates are in the right order
+dts_old
+
+dts_new <- paste("D", seq(1, length(dts_old), 1), sep = "")
+dts_new  
+
+dts <- data.frame(
+  old_date = dts_old,
+  new_date = dts_new
+)
+dts
+
+# Recode dates
+all_new_dts <- unlist(lapply(1:nrow(gg_df), function(i){
+  
+  dts$new_date[grep(paste("^", gg_df$date[i], "$", sep = ""), dts$old_date)]
+  
+}))
+
+unique(all_new_dts)
+
+if(length(all_new_dts) == nrow(gg_df)){
+  
+  gg_df$new_date <- all_new_dts
+  
+  gg_df <- gg_df %>%
+    # Update the date ordering
+    dplyr::mutate(
+      new_date = factor(new_date, levels = dts_new)
+    )
+  
+}
+
+glimpse(gg_df)
+
+# Make sparser date labeling
+date_labels <- gg_df %>% 
+  group_by(new_date) %>% 
+  dplyr::summarise(n = n()) %>% 
+  ungroup() %>% 
+  dplyr::mutate(
+    date_labels = as.character(new_date)
+  ) %>% 
+  dplyr::mutate(
+    date_labels = ifelse(date_labels %in% paste("D", seq(1, length(dts_old), 2), sep = ""), date_labels, "")
+  ) %>% 
+  pull(date_labels)
+
+date_labels
+
+# These are all in the same levels as the factor levels above
+gg_df %>%
+  pull(type) %>%
+  unique()
+
+levels(gg_df$type)
+
+# Recode dates for the behavioral epochs as well
+new_starts <- unlist(lapply(1:nrow(epochs), function(i){
+  
+  dts$new_date[grep(paste("^", epochs$start_date[i], "$", sep = ""), dts$old_date)]
+  
+}))
+
+# Check these carefully. D7 should be 7-4 and D22 should be 7-19
+dts
+epochs
+new_starts
+
+new_ends <- unlist(lapply(1:nrow(epochs), function(i){
+  
+  dts$new_date[grep(paste("^", epochs$end_date[i], "$", sep = ""), dts$old_date)]
+  
+}))
+
+new_ends
+
+epochs2 <- epochs %>% 
+  dplyr::mutate(
+    new_start = new_starts,
+    new_end = new_ends,
+    type = "outer beam breakers"
+  ) %>% 
+  dplyr::mutate(
+    new_start = factor(new_start, levels = dts$new_date),
+    new_end = factor(new_end, levels = dts$new_date)
+  )
+
+epochs2
+
+levels(epochs2$new_start)
+levels(epochs2$new_end)
+
+# These hexcodes should the same used for other figures made in Inkscape
+# #00147a is outer beam breakers
+# #a40000 is RFID
+# #5f79ff is inner beam breakers
+# #dfae04 is Camera
+cols <- c("#00147a", "#a40000", "#5f79ff", "#dfae04")
+
+# All 3 sensor types
+gg_df %>% 
+  group_by(new_date, type) %>% 
+  dplyr::summarise(n = n()) %>% 
+  # Create a unique rowid per date so that the x-axis will be ordered correctly
+  nest() %>% 
+  rowid_to_column() %>% 
+  unnest(`cols` = c(data)) %>% 
+  arrange(-desc(rowid)) %>% 
+  dplyr::mutate(
+    new_date = factor(new_date, levels = dts$new_date)
+  ) %>%
+  ggplot(aes(x = new_date, y = n, color = type)) +
+  
+  geom_line(aes(group = type), linewidth = 0.5) +
+  
+  # Add a shaded rectangle for each behavioral epoch
+  geom_rect(data = epochs2, aes(xmin = new_start, xmax = new_end, ymin = -Inf, ymax = Inf), color = alpha("black", 0.1), fill = alpha("black", 0.1), inherit.aes = FALSE) +
+  
+  scale_color_manual(values = cols) +
+  xlab("") +
+  ylab("") +
+  guides(color = "none") +
+  # Comment out these sparser labels to see the true labels and doublecheck (they look good)
+  scale_x_discrete(labels = date_labels) +
+  scale_y_continuous(limits = c(0, 6000), breaks = seq(0, 6000, 1000), labels = seq(0, 6000, 1000)) +
+  theme_bw() +
+  theme(
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    legend.position = "top",
+    axis.title = element_text(size = 8),
+    axis.text.y = element_text(size = 7, color = "black"),
+    axis.text.x = element_text(size = 8, angle = 90, vjust = 0.6, hjust = 1, color = "black"),
+    legend.title = element_text(size = 0),
+    legend.text = element_text(size = 8),
+    legend.margin = ggplot2::margin(t = 0, r = -5, b = -5, l = -5, unit = "pt"),
+    axis.ticks.y = element_line(linewidth = 0.25),
+    axis.ticks.x = element_blank()
+  ) 
+
+ggsave(file.path(figure_path, "preprocessed_data_Box-03.tiff"), units = "in", width = 5.6, height = 1.75, dpi = 600)
+
+```
+
+B. Four possible integrated datasets here.
+```{r}
+
+dim(integrated_all)
+dim(integrated_rfid_irbb)
+dim(integrated_rfid_video)
+dim(integrated_irbb_video)
+
+# Here I'm using the starts as the unique timestamp per each event
+gg_df_b <- integrated_all %>%
+  dplyr::arrange(start) %>%
+  dplyr::mutate(
+    date = paste(month(start), day(start), sep = "-"),
+    timestamp = as_datetime(hms(format(as.POSIXct(start, tz = "America/New York"), "%H:%M:%S"))),
+    type = "rfid + beam breakers + video"
+  ) %>%
+  dplyr::select(date, timestamp, type) %>% 
+  # Add the RFID-IRBB data
+  bind_rows(
+    integrated_rfid_irbb %>%
+      dplyr::arrange(start) %>%
+      dplyr::mutate(
+        date = paste(month(start), day(start), sep = "-"),
+        timestamp = as_datetime(hms(format(as.POSIXct(start, tz = "America/New York"), "%H:%M:%S"))),
+        type = "rfid + beam breakers"
+      ) %>%
+      dplyr::select(date, timestamp, type)
+  ) %>% 
+  # Add the RFID-Video data
+  bind_rows(
+    integrated_rfid_video %>%
+      dplyr::arrange(start) %>%
+      dplyr::mutate(
+        date = paste(month(start), day(start), sep = "-"),
+        timestamp = as_datetime(hms(format(as.POSIXct(start, tz = "America/New York"), "%H:%M:%S"))),
+        type = "rfid + video"
+      ) %>%
+      dplyr::select(date, timestamp, type)
+  ) %>% 
+  # Add the IRBB-Video data
+  bind_rows(
+    integrated_irbb_video %>%
+      dplyr::arrange(start) %>%
+      dplyr::mutate(
+        date = paste(month(start), day(start), sep = "-"),
+        timestamp = as_datetime(hms(format(as.POSIXct(start, tz = "America/New York"), "%H:%M:%S"))),
+        type = "beam breakers + video"
+      ) %>%
+      dplyr::select(date, timestamp, type)
+  ) %>% 
+  dplyr::mutate(
+    type = factor(type, levels = c("rfid + beam breakers + video", "rfid + beam breakers", "rfid + video", "beam breakers + video"))
+  )
+
+glimpse(gg_df_b)
+
+dts_old <- gg_df_b %>%
+  pull(date) %>%
+  unique()
+
+# Check the order of these dates carefully
+dts_old
+
+dts_new <- paste("D", seq(1, length(dts_old), 1), sep = "")
+dts_new  
+
+dts <- data.frame(
+  old_date = dts_old,
+  new_date = dts_new
+)
+dts
+
+# Recode dates
+all_new_dts <- unlist(lapply(1:nrow(gg_df_b), function(i){
+  
+  dts$new_date[grep(paste("^", gg_df_b$date[i], "$", sep = ""), dts$old_date)]
+  
+}))
+
+unique(all_new_dts)
+
+if(length(all_new_dts) == nrow(gg_df_b)){
+  
+  gg_df_b$new_date <- all_new_dts
+  
+  gg_df_b <- gg_df_b %>%
+    # Update the date ordering
+    dplyr::mutate(
+      new_date = factor(new_date, levels = dts_new)
+    )
+  
+}
+
+glimpse(gg_df_b)
+
+# Make sparser date labeling
+date_labels <- gg_df_b %>% 
+  group_by(new_date) %>% 
+  dplyr::summarise(n = n()) %>% 
+  ungroup() %>% 
+  dplyr::mutate(
+    date_labels = as.character(new_date)
+  ) %>% 
+  dplyr::mutate(
+    date_labels = ifelse(date_labels %in% paste("D", seq(1, length(dts_old), 2), sep = ""), date_labels, "")
+  ) %>% 
+  pull(date_labels)
+
+date_labels
+
+# Recode dates for the behavioral epochs as well
+new_starts <- unlist(lapply(1:nrow(epochs), function(i){
+  
+  dts$new_date[grep(paste("^", epochs$start_date[i], "$", sep = ""), dts$old_date)]
+  
+}))
+
+# Check these carefully. D7 should be 7-4 and D22 should be 7-19
+dts
+epochs
+new_starts
+
+new_ends <- unlist(lapply(1:nrow(epochs), function(i){
+  
+  dts$new_date[grep(paste("^", epochs$end_date[i], "$", sep = ""), dts$old_date)]
+  
+}))
+
+new_ends
+
+epochs2 <- epochs %>% 
+  dplyr::mutate(
+    new_start = new_starts,
+    new_end = new_ends,
+    type = "rfid + beam breakers + video"
+  ) %>% 
+  dplyr::mutate(
+    new_start = factor(new_start, levels = dts$new_date),
+    new_end = factor(new_end, levels = dts$new_date)
+  )
+  
+epochs2
+
+levels(epochs2$new_start)
+levels(epochs2$new_end)
+
+
+# These are all in the same levels as the factor levels above
+gg_df_b %>%
+  pull(type) %>%
+  unique()
+
+levels(gg_df_b$type)
+
+# solid is all 3 sensor types, longdash is rfid + beam breakers
+# dotdash is rfid + video, dotted is beam breakers + video
+ltys <- c("solid", "longdash", "dotdash", "dotted")
+
+gg_df_b %>% 
+  group_by(new_date, type) %>% 
+  dplyr::summarise(n = n()) %>% 
+  ungroup() %>% 
+  ggplot(aes(x = new_date, y = n, linetype = type)) +
+  geom_line(aes(group = type), linewidth = 0.5) +
+  
+  # Add a shaded rectangle for each behavioral epoch
+  geom_rect(data = epochs2, aes(xmin = new_start, xmax = new_end, ymin = -Inf, ymax = Inf), color = alpha("black", 0.1), fill = alpha("black", 0.1), inherit.aes = FALSE) +
+  
+  scale_linetype_manual(values = ltys) +
+  xlab("") +
+  ylab("") +
+  guides(linetype = "none") +
+  
+  # Comment out these sparser labels to see the true labels and doublecheck (they look good)
+  scale_x_discrete(labels = date_labels) +
+  scale_y_continuous(limits = c(0, 2500), breaks = seq(0, 2500, 500), labels = seq(0, 2500, 500)) +
+  theme_bw() +
+  theme(
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    legend.position = "top",
+    axis.title = element_text(size = 8),
+    axis.text.y = element_text(size = 7, color = "black"),
+    axis.text.x = element_text(size = 8, angle = 90, vjust = 0.6, hjust = 1, color = "black"),
+    legend.title = element_text(size = 0),
+    legend.text = element_text(size = 8),
+    legend.margin = ggplot2::margin(t = 0, r = -5, b = -5, l = -5, unit = "pt"),
+    axis.ticks.y = element_line(linewidth = 0.25),
+    axis.ticks.x = element_blank()
+  ) 
+
+ggsave(file.path(figure_path, "integrated_data_Box-03.tiff"), units = "in", width = 5.6, height = 1.75, dpi = 600)
+
+```
+
+C. Movements split by inferred entrances/exits for the fully integrated dataset. I also accounted for perching events and non-scored events too
+```{r}
+
+glimpse(integrated_all)
+
+# All entrances and exits should be labeled as "container_entrance" inferred movements
+# And no "inside_container" inferred movements should be labeled as entrances or exits
+# Looks good
+table(integrated_all$inferredMovement_Location, integrated_all$direction_scored)
+table(integrated_all$inferredMovement_Location) # 34910 "inside_container" events
+
+# Here I'm using the starts as the unique timestamp per each event
+gg_df_c <- integrated_all %>%
+  dplyr::arrange(start) %>%
+  dplyr::mutate(
+    date = paste(month(start), day(start), sep = "-"),
+    timestamp = as_datetime(hms(format(as.POSIXct(start, tz = "America/New York"), "%H:%M:%S"))),
+    type = "rfid + beam breakers + video"
+  ) %>%
+  dplyr::select(date, timestamp, direction_scored, perching_PIT_tag, inferredMovement_Location) %>% 
+  # Merge the directionality and movement location behavioral inferences
+  dplyr::mutate(
+    behavioral_inference = direction_scored,
+    behavioral_inference = ifelse(is.na(behavioral_inference), inferredMovement_Location, behavioral_inference)
+  ) %>% 
+  # Then for all rows with PIT tag IDs in the perching_PIT_tag ID column, change the direction_scored column to "perching", or a combination of perching plus movement inside of the container
+  dplyr::mutate(
+    behavioral_inference = ifelse(!is.na(perching_PIT_tag) & inferredMovement_Location == "container_entrance", "perching", behavioral_inference),
+    behavioral_inference = ifelse(!is.na(perching_PIT_tag) & inferredMovement_Location == "inside_container", "perching and inside_container", behavioral_inference)
+  ) %>% 
+  # Finally, catch any movements inside the entrance that had no direction scored (e.g. movements captured by a single sensor type)
+  dplyr::mutate(
+    # & inferredMovement_Location == "container_entrance"
+    behavioral_inference = ifelse(is.na(direction_scored)  & inferredMovement_Location == "container_entrance", "container entrance, no direction", behavioral_inference)
+  ) %>% 
+  dplyr::mutate(behavioral_inference = factor(behavioral_inference, levels = c("entrance", "exit", "perching", "inside_container", "perching and inside_container", "container entrance, no direction")))
+
+glimpse(gg_df_c)
+
+# FALSE
+# any(is.na(gg_df_c$inferredMovement_Location))
+
+table(gg_df_c$direction_scored)
+
+# Before adding the "perching and inside_container" category, there were 34751 "inside_container" events versus the 34910 original events (see above). I made the "perching and inside_container" category and now we're up to the original number of "inside_container" events
+table(gg_df_c$behavioral_inference)
+
+# No NA values, looks good
+gg_df_c %>%
+  pull(behavioral_inference) %>%
+  unique()
+
+
+dts_old <- gg_df_c %>%
+  pull(date) %>%
+  unique()
+
+# Check the order of these dates carefully
+dts_old
+
+dts_new <- paste("D", seq(1, length(dts_old), 1), sep = "")
+dts_new  
+
+dts <- data.frame(
+  old_date = dts_old,
+  new_date = dts_new
+)
+dts
+
+# Recode dates
+all_new_dts <- unlist(lapply(1:nrow(gg_df_c), function(i){
+  
+  dts$new_date[grep(paste("^", gg_df_c$date[i], "$", sep = ""), dts$old_date)]
+  
+}))
+
+unique(all_new_dts)
+
+if(length(all_new_dts) == nrow(gg_df_c)){
+  
+  gg_df_c$new_date <- all_new_dts
+  
+  gg_df_c <- gg_df_c %>%
+    # Update the date ordering
+    dplyr::mutate(
+      new_date = factor(new_date, levels = dts_new)
+    )
+  
+}
+
+glimpse(gg_df_c)
+
+# Make sparser date labeling
+date_labels <- gg_df_c %>% 
+  group_by(new_date) %>% 
+  dplyr::summarise(n = n()) %>% 
+  ungroup() %>% 
+  dplyr::mutate(
+    date_labels = as.character(new_date)
+  ) %>% 
+  dplyr::mutate(
+    date_labels = ifelse(date_labels %in% paste("D", seq(1, length(dts_old), 2), sep = ""), date_labels, "")
+  ) %>% 
+  pull(date_labels)
+
+date_labels
+
+# Recode dates for the behavioral epochs as well
+new_starts <- unlist(lapply(1:nrow(epochs), function(i){
+  
+  dts$new_date[grep(paste("^", epochs$start_date[i], "$", sep = ""), dts$old_date)]
+  
+}))
+
+# Check these carefully. D7 should be 7-4 and D22 should be 7-19
+dts
+epochs
+new_starts
+
+new_ends <- unlist(lapply(1:nrow(epochs), function(i){
+  
+  dts$new_date[grep(paste("^", epochs$end_date[i], "$", sep = ""), dts$old_date)]
+  
+}))
+
+new_ends
+
+epochs2 <- epochs %>% 
+  dplyr::mutate(
+    new_start = new_starts,
+    new_end = new_ends
+  ) %>% dplyr::mutate(
+    new_start = factor(new_start, levels = dts$new_date),
+    new_end = factor(new_end, levels = dts$new_date)
+  )
+  
+
+epochs2
+
+levels(epochs2$new_start)
+levels(epochs2$new_end)
+
+# These are all in the same levels as the factor levels above
+gg_df_c %>%
+  pull(behavioral_inference) %>%
+  unique()
+
+levels(gg_df_c$behavioral_inference)
+
+# All behavioral inferences
+# longdash is entrances, dotdash is exits, dotted is perching, solid is inside container, dashed is perching and inside_container, twodash is container entrance, no direction
+# ltys <- c("longdash", "dotdash", "dotted", "solid", "dashed", "twodash")
+
+# The 4 behavioral inferences with the most data
+# longdash is entrances, dotdash is exits, dotted is perching, solid is inside container
+ltys <- c("longdash", "dotdash", "dotted", "solid")
+
+# The fully integrated dataset split by behavioral inference
+gg_df_c %>% 
+  dplyr::filter(behavioral_inference %in% c("entrance", "exit", "perching", "inside_container")) %>% 
+  droplevels() %>% 
+  group_by(new_date, behavioral_inference) %>% 
+  dplyr::summarise(n = n()) %>% 
+  ungroup() %>% 
+  ggplot(aes(x = new_date, y = n, linetype = behavioral_inference)) +
+  geom_line(aes(group = behavioral_inference), linewidth = 0.5) +
+  
+  # Add a shaded rectangle for each behavioral epoch
+  geom_rect(data = epochs2, aes(xmin = new_start, xmax = new_end, ymin = -Inf, ymax = Inf), color = alpha("black", 0.1), fill = alpha("black", 0.1), inherit.aes = FALSE) +
+  
+  scale_linetype_manual(values = ltys) +
+  xlab("") +
+  ylab("") +
+  guides(linetype = "none") +
+  
+  # Comment out these sparser labels to see the true labels and doublecheck (they look good)
+  scale_x_discrete(labels = date_labels) +
+  # scale_y_continuous(limits = c(0, 300), breaks = seq(0, 300, 100), labels = seq(0, 300, 100)) +
+  theme_bw() +
+  theme(
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    legend.position = "top",
+    axis.title = element_text(size = 8),
+    axis.text.y = element_text(size = 7, color = "black"),
+    axis.text.x = element_text(size = 8, angle = 90, vjust = 0.6, hjust = 1, color = "black"),
+    legend.title = element_text(size = 0),
+    legend.text = element_text(size = 8),
+    legend.margin = ggplot2::margin(t = 0, r = -5, b = -5, l = -5, unit = "pt"),
+    axis.ticks.y = element_line(linewidth = 0.25),
+    axis.ticks.x = element_line(linewidth = 0.25)
+  ) 
+
+# Supplementary Figure 2
+# ggsave(file.path(figure_path, "integrated_data_allInferences_Box-03.tiff"), units = "in", width = 5.58, height = 1.75, dpi = 600)
+
+# Figure 5 Panel C
+ggsave(file.path(figure_path, "integrated_data_fourInferences_Box-03.tiff"), units = "in", width = 5.6, height = 1.75, dpi = 600)
+
+```
+
+Figure 6: Movements split by individual identity for the fully integrated dataset. I also accounted for movements not attributed to individuals.
+```{r}
+
+glimpse(integrated_all)
+
+# Here I'm using the starts as the unique timestamp per each event
+# I'm also assigning each event to the individual that initiated (some of these detection bouts may represent 2 individuals together)
+gg_df_d <- integrated_all %>%
+  dplyr::arrange(start) %>%
+  dplyr::mutate(
+    date = paste(month(start), day(start), sep = "-"),
+    timestamp = as_datetime(hms(format(as.POSIXct(start, tz = "America/New York"), "%H:%M:%S")))
+  ) %>%
+  dplyr::mutate(
+    individual_initiated = gsub("01-10-16-CD-1C", "Female", individual_initiated),
+    individual_initiated = gsub("01-10-3F-8F-F0", "Male", individual_initiated)
+  ) %>% 
+  dplyr::mutate(
+    behavioral_inference = individual_initiated,
+    behavioral_inference = ifelse(is.na(behavioral_inference) & inferredMovement_Location == "container_entrance", "unassigned container_entrance", behavioral_inference),
+    behavioral_inference = ifelse(is.na(behavioral_inference) & inferredMovement_Location == "inside_container", "unassigned inside_container", behavioral_inference),
+    behavioral_inference = factor(behavioral_inference, levels = c("Female", "Male", "unassigned container_entrance", "unassigned inside_container"))
+  ) %>%
+  dplyr::select(date, timestamp, behavioral_inference)
+
+glimpse(gg_df_d)
+
+table(gg_df_d$behavioral_inference)
+
+# No NAs
+gg_df_d %>% 
+  pull(behavioral_inference) %>% 
+  unique()
+
+dts_old <- gg_df_d %>%
+  pull(date) %>%
+  unique()
+
+# Check the order of these dates very carefully
+dts_old
+
+dts_new <- paste("D", seq(1, length(dts_old), 1), sep = "")
+dts_new  
+
+dts <- data.frame(
+  old_date = dts_old,
+  new_date = dts_new
+)
+dts
+
+# Recode dates
+all_new_dts <- unlist(lapply(1:nrow(gg_df_d), function(i){
+  
+  dts$new_date[grep(paste("^", gg_df_d$date[i], "$", sep = ""), dts$old_date)]
+  
+}))
+
+unique(all_new_dts)
+
+if(length(all_new_dts) == nrow(gg_df_d)){
+  
+  gg_df_d$new_date <- all_new_dts
+  
+  gg_df_d <- gg_df_d %>%
+    # Update the date ordering
+    dplyr::mutate(
+      new_date = factor(new_date, levels = dts_new)
+    )
+  
+}
+
+glimpse(gg_df_d)
+
+# Make sparser date labeling
+date_labels <- gg_df_d %>% 
+  group_by(new_date) %>% 
+  dplyr::summarise(n = n()) %>% 
+  ungroup() %>% 
+  dplyr::mutate(
+    date_labels = as.character(new_date)
+  ) %>% 
+  dplyr::mutate(
+    date_labels = ifelse(date_labels %in% paste("D", seq(1, length(dts_old), 2), sep = ""), date_labels, "")
+  ) %>% 
+  pull(date_labels)
+
+date_labels
+
+# Recode dates for the behavioral epochs as well
+new_starts <- unlist(lapply(1:nrow(epochs), function(i){
+  
+  dts$new_date[grep(paste("^", epochs$start_date[i], "$", sep = ""), dts$old_date)]
+  
+}))
+
+# Check these carefully. D7 should be 7-4 and D22 should be 7-19
+dts
+epochs
+new_starts
+
+new_ends <- unlist(lapply(1:nrow(epochs), function(i){
+  
+  dts$new_date[grep(paste("^", epochs$end_date[i], "$", sep = ""), dts$old_date)]
+  
+}))
+
+new_ends
+
+epochs2 <- epochs %>% 
+  dplyr::mutate(
+    new_start = new_starts,
+    new_end = new_ends
+  ) %>% dplyr::mutate(
+    new_start = factor(new_start, levels = dts$new_date),
+    new_end = factor(new_end, levels = dts$new_date)
+  )
+  
+
+epochs2
+
+levels(epochs2$new_start)
+levels(epochs2$new_end)
+
+gg_df_d %>%
+  pull(behavioral_inference) %>%
+  unique()
+
+# Aesthetics are assigned by level of this factor
+levels(gg_df_d$behavioral_inference)
+
+# orange will be female, green is male, and dark grey is not assigned
+# Use these same hexcodes in other figures
+cols <- c("#d58e09", "#049902", "#262626", "#262626")
+
+# Solid lines indicate inferred movements at the container entrance (female, male, unassigned container entrance), while dashed is for inferred movements inside of the container (unassigned inside container)
+ltys <- c("solid", "solid", "solid", "dashed")
+
+# The fully integrated dataset split by individual_id (when scored)
+gg_df_d %>% 
+  group_by(new_date, behavioral_inference) %>% 
+  dplyr::summarise(n = n()) %>% 
+  ungroup() %>% 
+  ggplot(aes(x = new_date, y = n, color = behavioral_inference, linetype = behavioral_inference)) +
+  geom_line(aes(group = behavioral_inference), linewidth = 0.5) +
+  
+  # Add a shaded rectangle for each behavioral epoch
+  geom_rect(data = epochs2, aes(xmin = new_start, xmax = new_end, ymin = -Inf, ymax = Inf), color = alpha("black", 0.1), fill = alpha("black", 0.1), inherit.aes = FALSE) +
+  
+  scale_color_manual(values = cols) +
+  scale_linetype_manual(values = ltys) +
+  xlab("") +
+  ylab("") +
+  
+  guides(color = "none", linetype = "none") +
+  
+  # Comment out these sparser labels to see the true labels and doublecheck (they look good)
+  scale_x_discrete(labels = date_labels) +
+  scale_y_continuous(limits = c(0, 2100), breaks = seq(0, 2000, 500), labels = seq(0, 2000, 500)) +
+  theme_bw() +
+  theme(
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    legend.position = "top",
+    axis.title = element_text(size = 8),
+    axis.text.y = element_text(size = 7, color = "black"),
+    axis.text.x = element_text(size = 8, angle = 90, vjust = 0.6, hjust = 1, color = "black"),
+    legend.title = element_text(size = 0),
+    legend.text = element_text(size = 8),
+    legend.margin = ggplot2::margin(t = 0, r = -5, b = -5, l = -5, unit = "pt"),
+    axis.ticks = element_line(linewidth = 0.25)
+  ) 
+
+ggsave(file.path(figure_path, "integrated_data_individuals_Box-03.tiff"), units = "in", width = 5.6, height = 1.75, dpi = 600)
+
+```
+
+Supplementary Figure 3: Magnitude of movement
+
+```{r}
+
+glimpse(integrated_all)
+
+range(integrated_all$magnitude_movement, na.rm = TRUE)
+mean(integrated_all$magnitude_movement, na.rm = TRUE)
+hist(integrated_all$magnitude_movement)
+
+# Split this into quartiles
+test <- cut(integrated_all$magnitude_movement, quantile(integrated_all$magnitude_movement, na.rm = TRUE), include.lowest = TRUE, labels = FALSE)
+str(test)
+
+# The default is right = TRUE, so intervals are closed on the right (open on the left)
+quantile(integrated_all$magnitude_movement, na.rm = TRUE)
+
+table(test)
+
+# Here I'm adding a new column that assigns movement events to 1 of 4 quartiles (see above)
+gg_mag_mov <- integrated_all %>%
+  dplyr::filter(!is.na(magnitude_movement)) %>% 
+  dplyr::arrange(start) %>%
+  dplyr::mutate(
+    date = paste(month(start), day(start), sep = "-"),
+    timestamp = as_datetime(hms(format(as.POSIXct(start, tz = "America/New York"), "%H:%M:%S")))
+  ) %>%
+  dplyr::mutate(
+    mag_mov_quartile = cut(magnitude_movement, quantile(magnitude_movement), include.lowest = TRUE, labels = FALSE)
+  ) %>% 
+  dplyr::mutate(
+    mag_mov_quartile = factor(mag_mov_quartile, levels = c("1", "2", "3", "4"))
+  )
+
+glimpse(gg_mag_mov)
+levels(gg_mag_mov$mag_mov_quartile)
+
+dts_old <- gg_mag_mov %>%
+  pull(date) %>%
+  unique()
+
+# Check the order of these dates very carefully
+dts_old
+
+dts_new <- paste("D", seq(1, length(dts_old), 1), sep = "")
+dts_new  
+
+dts <- data.frame(
+  old_date = dts_old,
+  new_date = dts_new
+)
+dts
+
+# Recode dates
+all_new_dts <- unlist(lapply(1:nrow(gg_mag_mov), function(i){
+  
+  dts$new_date[grep(paste("^", gg_mag_mov$date[i], "$", sep = ""), dts$old_date)]
+  
+}))
+
+unique(all_new_dts)
+
+if(length(all_new_dts) == nrow(gg_mag_mov)){
+  
+  gg_mag_mov$new_date <- all_new_dts
+  
+  gg_mag_mov <- gg_mag_mov %>%
+    # Update the date ordering
+    dplyr::mutate(
+      new_date = factor(new_date, levels = dts_new)
+    )
+  
+}
+
+glimpse(gg_mag_mov)
+
+# Make sparser date labeling
+date_labels <- gg_mag_mov %>% 
+  group_by(new_date) %>% 
+  dplyr::summarise(n = n()) %>% 
+  ungroup() %>% 
+  dplyr::mutate(
+    date_labels = as.character(new_date)
+  ) %>% 
+  dplyr::mutate(
+    date_labels = ifelse(date_labels %in% paste("D", seq(1, length(dts_old), 2), sep = ""), date_labels, "")
+  ) %>% 
+  pull(date_labels)
+
+date_labels
+
+# Recode dates for the behavioral epochs as well
+new_starts <- unlist(lapply(1:nrow(epochs), function(i){
+  
+  dts$new_date[grep(paste("^", epochs$start_date[i], "$", sep = ""), dts$old_date)]
+  
+}))
+
+# Check these carefully. D7 should be 7-4 and D22 should be 7-19
+dts
+epochs
+new_starts
+
+new_ends <- unlist(lapply(1:nrow(epochs), function(i){
+  
+  dts$new_date[grep(paste("^", epochs$end_date[i], "$", sep = ""), dts$old_date)]
+  
+}))
+
+new_ends
+
+epochs2 <- epochs %>% 
+  dplyr::mutate(
+    new_start = new_starts,
+    new_end = new_ends
+  ) %>% dplyr::mutate(
+    new_start = factor(new_start, levels = dts$new_date),
+    new_end = factor(new_end, levels = dts$new_date)
+  )
+  
+
+epochs2
+
+levels(epochs2$new_start)
+levels(epochs2$new_end)
+
+# These are all in the same levels as the factor levels above
+gg_mag_mov %>%
+  pull(mag_mov_quartile) %>%
+  unique()
+
+levels(gg_mag_mov$mag_mov_quartile)
+
+# Solid is 4, dashed is 3, dotted is 2, dotdash is 1 (these are the quartile assignments) 
+ltys <- rev(c("solid", "dashed", "dotted", "dotdash"))
+
+# The fully integrated dataset split by quartile of magnitude of movement (when video data was present)
+gg_mag_mov %>% 
+  group_by(new_date, mag_mov_quartile) %>% 
+  dplyr::summarise(n = n()) %>% 
+  ungroup() %>% 
+  ggplot(aes(x = new_date, y = n, linetype = mag_mov_quartile)) +
+  geom_line(aes(group = mag_mov_quartile), linewidth = 0.5) +
+  
+  # Add a shaded rectangle for each behavioral epoch
+  geom_rect(data = epochs2, aes(xmin = new_start, xmax = new_end, ymin = -Inf, ymax = Inf), color = alpha("black", 0.1), fill = alpha("black", 0.1), inherit.aes = FALSE) +
+  
+  scale_linetype_manual(values = ltys) +
+  xlab("") +
+  ylab("") +
+  
+  guides(linetype = "none") +
+  
+  # Comment out these sparser labels to see the true labels and doublecheck (they look good)
+  scale_x_discrete(labels = date_labels) +
+  scale_y_continuous(limits = c(0, 700), breaks = seq(0, 700, 100), labels = seq(0, 700, 100)) +
+  theme_bw() +
+  theme(
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    legend.position = "top",
+    axis.title = element_text(size = 8),
+    axis.text.y = element_text(size = 8, color = "black"),
+    axis.text.x = element_text(size = 8, angle = 90, vjust = 0.6, hjust = 1, color = "black"),
+    legend.title = element_text(size = 0),
+    legend.text = element_text(size = 8),
+    legend.margin = ggplot2::margin(t = 0, r = -5, b = -5, l = -5, unit = "pt"),
+    axis.ticks = element_line(linewidth = 0.25)
+  ) 
+
+ggsave(file.path(figure_path, "integrated_data_movementQuartiles_Box-03.tiff"), units = "in", width = 5.6, height = 1.75, dpi = 600)
+
+```
+
+Supplementary Figure 4: I also want a heat map that demonstrates how the different magnitude of movement categories map onto different behavioral inference categories.
+```{r}
+
+gg_magMov_behavInfer <- integrated_all %>%
+  dplyr::filter(!is.na(magnitude_movement)) %>%
+  dplyr::arrange(start) %>%
+  dplyr::mutate(
+    date = paste(month(start), day(start), sep = "-"),
+    timestamp = as_datetime(hms(format(as.POSIXct(start, tz = "America/New York"), "%H:%M:%S")))
+  ) %>%
+  dplyr::mutate(
+    mag_mov_quartile = cut(magnitude_movement, quantile(magnitude_movement), include.lowest = TRUE, labels = FALSE)
+  ) %>% 
+  dplyr::mutate(
+    mag_mov_quartile = factor(mag_mov_quartile, levels = c("1", "2", "3", "4"))
+  ) %>% 
+  # Merge the directionality and movement location behavioral inferences
+  dplyr::mutate(
+    behavioral_inference = direction_scored,
+    behavioral_inference = ifelse(is.na(behavioral_inference), inferredMovement_Location, behavioral_inference)
+  ) %>% 
+  # Then for all rows with PIT tag IDs in the perching_PIT_tag ID column, change the direction_scored column to "perching", or a combination of perching plus movement inside of the container
+  dplyr::mutate(
+    behavioral_inference = ifelse(!is.na(perching_PIT_tag) & inferredMovement_Location == "container_entrance", "perching", behavioral_inference),
+    behavioral_inference = ifelse(!is.na(perching_PIT_tag) & inferredMovement_Location == "inside_container", "perching and inside_container", behavioral_inference)
+  ) %>% 
+  # Finally, catch any movements inside the entrance that had no direction scored (e.g. movements captured by a single sensor type)
+  dplyr::mutate(behavioral_inference = factor(behavioral_inference, levels = rev(c("entrance", "exit", "perching", "inside_container", "perching and inside_container", "container entrance, no direction"))))
+
+glimpse(gg_magMov_behavInfer)
+
+# There are no "container entrance, no direction" observations since these were dropped by the filter on no NAs in the magnitude of movement column (so those observations were collected from non-camera sensors only)
+table(gg_magMov_behavInfer$mag_mov_quartile, gg_magMov_behavInfer$behavioral_inference)
+
+unique(gg_magMov_behavInfer$behavioral_inference)
+
+heat_map_dats <- gg_magMov_behavInfer %>% 
+  group_by(mag_mov_quartile, behavioral_inference) %>% 
+  dplyr::summarise(Z = n()) %>% 
+  ungroup() %>% 
+  dplyr::mutate(
+    n = as.numeric(Z)
+  ) 
+
+glimpse(heat_map_dats)
+
+heat_map_dats %>% 
+  ggplot(aes(x = mag_mov_quartile, y = behavioral_inference, fill = n)) +
+  geom_tile() +
+  scale_fill_gradient(low = alpha("navy", 0.1), high = alpha("navy", 0.7), breaks = c(15, 9500)) +
+  theme_bw() +
+  theme(
+    panel.grid.major = element_blank()
+  )
+  
+ggsave(file.path(figure_path, "heatMap_movementQuartiles_behavInferences_Box-03.tiff"), units = "in", width = 10, height = 5, dpi = 600)
+
+```
