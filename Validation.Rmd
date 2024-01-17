@@ -1,0 +1,73 @@
+---
+title: "Validation"
+author: "Grace Smith-Vidaurre"
+date: "2024-01-17"
+output: html_document
+---
+
+Purpose: Plan out a validation based on manual video scoring of videos recorded by the ABISSMAL tracking system.
+
+```{r libraries and paths}
+
+rm(list = ls())
+
+library(tidyverse)
+library(pbapply)
+library(data.table)
+
+orig_path <- "/media/gsvidaurre/Anodorhynchus/Data_Testing/Box_03_23Jun2023"
+
+```
+
+Get the directories with videos of interest.
+```{r}
+
+# Print all of the directories with video files
+vid_dirs <- list.files(file.path(orig_path, "Data/Video"), pattern = "^2023_*", full.names = TRUE)
+
+# Filter out dates with videos recorded prior to the first detection of a PIT tag on June 28th
+vid_dirs <- vid_dirs[!grepl(paste(paste("_", c("06_23", "06_24", "06_25", "06_26", "06_27"), "$", sep = ""), collapse = "|"), vid_dirs)]
+
+# 50 days of data collection remain
+vid_dirs
+
+```
+
+How many videos were recorded for the pair in Box_03? The first date that a PIT tag was recorded by the RFID system was 6-28 (June 28th, see the script for making figures).
+```{r}
+
+all_videos <- list.files(vid_dirs, pattern = ".mp4")
+
+# 81,298 videos recorded over 50 days
+length(all_videos)
+
+```
+
+How many videos were recorded per day?
+```{r}
+
+# i <- 1
+vids_by_day <- data.table::rbindlist(pblapply(1:length(vid_dirs), function(i){
+  
+  n <- length(list.files(vid_dirs[i], pattern = ".mp4", recursive = TRUE))
+  
+  return(
+    data.frame(
+      day = gsub(file.path(orig_path, "Data/Video/2023_"), "", vid_dirs[i]),
+      num_videos = n
+    )
+  )
+  
+}))
+
+glimpse(vids_by_day) 
+
+# The minimum number of videos recorded each day was 34, and the max was 4493. Median of 1456
+vids_by_day %>% 
+  dplyr::summarise(
+    min = min(num_videos),
+    median = median(num_videos),
+    max = max(num_videos)
+  )
+
+```
