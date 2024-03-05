@@ -41,20 +41,34 @@ all_videos <- list.files(vid_dirs, pattern = ".mp4")
 # 81,298 videos recorded over 50 days
 length(all_videos)
 
+# 40649 unique video recording events (since each motion detection event resulted in recording 1 pre- and 1 post-motion detection video) 
+length(all_videos)/2
+
 ```
 
-How many videos were recorded per day?
+How many videos were recorded per day? Here focus on the pre-trigger videos to get the unique number of video recording events.
 ```{r}
 
 # i <- 1
 vids_by_day <- data.table::rbindlist(pblapply(1:length(vid_dirs), function(i){
   
-  n <- length(list.files(vid_dirs[i], pattern = ".mp4", recursive = TRUE))
+  vids <- list.files(vid_dirs[i], pattern = ".mp4", recursive = TRUE)
+  
+  dates <- sapply(1:length(vids), function(x){
+    
+    tmp <- strsplit(vids[x], split = "_")[[1]]
+    
+    return(paste(tmp[4], tmp[5], sep = "_"))
+    
+  }) 
   
   return(
     data.frame(
-      day = gsub(file.path(orig_path, "Data/Video/2023_"), "", vid_dirs[i]),
-      num_videos = n
+      # These videos were saved prior to fixing a bug that placed videos from the day before into a folder for the given day
+      # So get the day from the video file name instead
+      # day = gsub(file.path(orig_path, "Data/Video/2023_"), "", vid_dirs[i]),
+      date = dates,
+      videos = vids
     )
   )
   
@@ -62,12 +76,157 @@ vids_by_day <- data.table::rbindlist(pblapply(1:length(vid_dirs), function(i){
 
 glimpse(vids_by_day) 
 
-# The minimum number of videos recorded each day was 34, and the max was 4493. Median of 1456
-vids_by_day %>% 
+# The minimum number of videos recorded each day was 17, and the max was 2258. Median of 720
+vids_by_day %>%
+  dplyr::filter(grepl("pre_trigger", videos)) %>% 
+  group_by(date) %>%
   dplyr::summarise(
-    min = min(num_videos),
-    median = median(num_videos),
-    max = max(num_videos)
+    n = length(videos)
+  ) %>% 
+  dplyr::summarise(
+    min = min(n),
+    median = median(n),
+    max = max(n)
   )
 
 ```
+
+Behavioral epochs determined for the pair of birds used in the methods manuscript: eggs were laid from July 4th to July 8th (07-04 to 07-08), eggs hatched from July 19th to 22nd (07-19 to 07-22), and chicks fledged from August 6th to 7th (08-06 to 08-07). See the script for making figures for the methods manuscript for more information. 
+
+Pick one day for each of these epochs for manual video scoring. All of the videos recorded per day will be scored for each of these days. I picked the last day of each epoch above.
+```{r}
+
+days <- c("7_8", "7_22", "8_7")
+
+vids_by_day %>%
+  dplyr::filter(grepl("pre_trigger", videos)) %>%
+  dplyr::filter(date %in% days) %>% 
+  group_by(date) %>%
+  dplyr::summarise(
+    n = length(videos)
+  )
+
+# # A tibble: 3 × 2
+#   date      n
+#   <chr> <int>
+# 1 7_22    710
+# 2 7_8     725
+# 3 8_7    2140
+
+```
+
+There are 3575 unique recording events across these 3 days, for a total of at least 7150 videos (pre- and post-). Together, the videos per recording event are a total of 15 seconds, meaning that 53,625 seconds or 894 minutes of video must be scored. If it takes 5 minutes to score the pair of videos representing each video recording event, then we will need to spend 4,470 minutes or 74.5 hours scoring these videos.
+
+Create a new directory on the hard drive for validation / manual video scoring.
+```{r}
+
+dir.create("/media/gsvidaurre/Anodorhynchus/ABISSMAL_MethodsPaper/Validation")
+dir.create("/media/gsvidaurre/Anodorhynchus/ABISSMAL_MethodsPaper/Validation/videos")
+dir.create("/media/gsvidaurre/Anodorhynchus/ABISSMAL_MethodsPaper/Validation/masked_videos")
+
+```
+
+Write out a spreadsheet of all of the video file names that will be scored, plus a column of new file names for masking purposes. Note that the order of videos was randomized prior to masking. Masking metadata about each video and also presenting these out of consecutive order to an observer should help avoid some forms of bias. 
+```{r}
+
+# The total number of videos across these 3 days is 7150, as expected
+vids_by_day %>%
+  dplyr::filter(date %in% days) %>% 
+  nrow(.)
+
+# Randomize the order of the videos, but by unique recording event
+target_vids <- vids_by_day %>%
+  dplyr::filter(date %in% days) %>% 
+  dplyr::filter(grepl("pre_", videos))
+
+nrow(target_vids)
+
+set.seed(879)
+index <- sample(1:nrow(target_vids), nrow(target_vids), replace = FALSE)
+
+index
+
+target_vids_rs <- target_vids %>% 
+  dplyr::mutate(
+    index = index
+  ) %>% 
+  dplyr::arrange(-desc(index)) %>%
+  dplyr::mutate(
+    masked_name = paste(paste(paste("video", index, sep = "_"), "1", sep = "_"), ".mp4", sep = "")
+  ) %>% 
+  # Add back the post-trigger videos while ensuring that each post- video follows the corresponding pre-trigger video
+  bind_rows(
+    target_vids %>%
+      dplyr::mutate(
+        videos = gsub("pre_", "post_", videos)
+      ) %>% 
+      dplyr::mutate(
+        index = index
+      ) %>% 
+      dplyr::arrange(-desc(index)) %>%
+      dplyr::mutate(
+        masked_name = paste(paste(paste("video", index, sep = "_"), "2", sep = "_"), ".mp4", sep = "")
+      )
+  ) %>% 
+  dplyr::arrange(-desc(index)) %>% 
+  rowid_to_column() %>% 
+  dplyr::select(rowid, videos, masked_name)
+
+# Looks great
+glimpse(target_vids_rs)
+# View(target_vids_rs)
+
+```
+
+Write out this spreadsheet to a folder that the observer will not see.
+```{r}
+
+target_vids_rs %>% 
+  write.csv(file.path("/media/gsvidaurre/Anodorhynchus/ABISSMAL_MethodsPaper/Validation/unmasked_video_names.csv"), row.names = FALSE)
+
+```
+
+Next, copy the videos that will be scored to another folder on the same hard drive.
+```{r}
+
+all_videos <- list.files(vid_dirs, pattern = ".mp4", full.names = TRUE)
+head(all_videos)
+
+full_paths <- unlist(pblapply(1:nrow(target_vids_rs), function(i){
+  
+  return(all_videos[grep(paste(paste(target_vids_rs$videos[i], "$", sep = ""), collapse = "|"), all_videos)])
+  
+}))
+
+# Check that the paths match the correct files, looks good
+# data.frame(full_paths, vids = target_vids_rs$videos) %>% 
+  # View()
+
+file.copy(full_paths, file.path("/media/gsvidaurre/Anodorhynchus/ABISSMAL_MethodsPaper/Validation/videos", target_vids_rs$videos))
+
+# Check that the files copied over are the same as the target videos
+copied_files <- list.files("/media/gsvidaurre/Anodorhynchus/ABISSMAL_MethodsPaper/Validation/videos", pattern = ".mp4")
+
+# Looks good
+all(copied_files %in% target_vids_rs$videos)
+all(target_vids_rs$videos %in% copied_files)
+
+```
+
+Then rename these videos to the masked names, while creating another copy of each file. 
+```{r}
+
+head(target_vids_rs$videos)
+head(target_vids_rs$masked_name)
+
+file.copy(
+  from = file.path("/media/gsvidaurre/Anodorhynchus/ABISSMAL_MethodsPaper/Validation/videos", target_vids_rs$videos), 
+  to = file.path("/media/gsvidaurre/Anodorhynchus/ABISSMAL_MethodsPaper/Validation/masked_videos", target_vids_rs$masked_name)
+)
+
+```
+
+
+These masked files can now be copied to another hard drive for sharing with observer(s) who will score these videos. 
+
+
