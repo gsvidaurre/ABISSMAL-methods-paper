@@ -1,0 +1,113 @@
+---
+title: "Interobserver reliability"
+author: "Grace Smith-Vidaurre"
+date: "2024-07-18"
+output: html_document
+---
+
+Purpose: Calculate interobserver reliability for a small set of videos scored by two observers prior to scoring the full set of videos that will be used for the first round of ABISSMAL validation. See the script "validation_approach.Rmd" for more information about how videos were selected for validation. Videos were scored in BORIS using protocol written for video scoring, and an ethogram with four behaviors (exit, entrance, perching, and inside of the container) for coarse-grained validation. Each observer scored the same masked set of 25 unique recording events (50 videos total). 
+
+```{r libraries and paths}
+
+rm(list = ls())
+
+library(tidyverse)
+library(pbapply)
+library(data.table)
+
+path <- "~/Desktop/ABISSMAL_BORIS_InterObserverReliability"
+
+```
+
+Read in all of the spreadsheets across both observers. Each spreadsheet represents events scored for one of 25 unique recording events, or 25 pairs of videos recorded by motion-detection.
+```{r}
+
+# Print all of the directories with video files
+files <- list.files(path, pattern = ".csv$", full.names = TRUE)
+length(files)
+
+combined_events <- data.table::rbindlist(pblapply(1:length(files), function(i){
+  
+  read.csv(files[i])
+  
+}))
+
+glimpse(combined_events)
+View(combined_events)
+
+# There should be 25 unique recording events or pairs of media file names
+# The 50 masked videos have numeric ids for the unique recording event and then the video within each pair
+n <- 25
+video_nms <- paste(paste(rep(paste("video", seq(1, n, 1), sep = "_"), each = 2), seq(1, 2, 1), sep = "_"), ".mp4", sep = "")
+video_nms
+
+# sapply(1:length(video_nms), function(i){
+#   
+#   length(grep(video_nms[i], combined_events$Media.file.name))
+#   
+# })
+
+```
+
+Find the unique observers in the dataset.
+```{r}
+
+# Remove the unique video file names to return the unique paths per observer
+user_paths <- unique(gsub(paste(video_nms, collapse = "|"), "", combined_events$Media.file.name))
+user_paths
+
+# Add a new column specifying unique numeric ids per observer to the data frame
+combined_events <- combined_events %>% 
+  dplyr::mutate(
+    user_paths = ifelse(grepl(user_paths[1], Media.file.name), user_paths[1], user_paths[2]),
+    user_id = ifelse(grepl(user_paths[1], Media.file.name), 1, 2)
+  )
+
+glimpse(combined_events)
+
+# Checking, looks good
+combined_events %>% 
+  distinct(
+    user_paths, user_id
+  )
+
+```
+
+For each unique recording event, arrange the events scored by each observer. Focus on the behavior (the ethogram categories) and the type (start or stop) for now.
+```{r}
+
+# I need unique recording events, not unique video names here
+rec_nms <- paste(paste("video", seq(1, n, 1), sep = "_"), "_", sep = "")
+rec_nms
+
+i <- 1
+
+pblapply(1:length(rec_nms), function(i){
+
+  combined_events %>% 
+    dplyr::filter(
+      grepl(rec_nms[i], Media.file.name)
+    ) %>%
+    dplyr::select(Media.file.name, Behavior, Behavior.type, user_id) %>%
+    dplyr::mutate(
+      Behavior_and_type = paste(Behavior, Behavior.type, sep = "- ")
+    ) %>%
+    group_by(user_id) %>% 
+    # Make a unique row id for pivoting within groups (users)
+    dplyr::mutate(
+      row = row_number()
+    ) %>% 
+    pivot_wider(
+      names_from = "user_id",
+      values_from = c("Behavior", "Behavior.type", "Behavior_and_type")
+    ) %>%
+    View()
+  
+  length(grep(video_nms[i], combined_events$Media.file.name))
+
+})
+
+
+
+```
+
