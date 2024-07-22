@@ -14,6 +14,8 @@ rm(list = ls())
 library(tidyverse)
 library(pbapply)
 library(data.table)
+library(irr)
+library(lubridate)
 
 path <- "~/Desktop/ABISSMAL_BORIS_InterObserverReliability"
 
@@ -29,23 +31,16 @@ length(files)
 combined_events <- data.table::rbindlist(pblapply(1:length(files), function(i){
   
   read.csv(files[i])
-  
+
 }))
 
 glimpse(combined_events)
-View(combined_events)
 
 # There should be 25 unique recording events or pairs of media file names
 # The 50 masked videos have numeric ids for the unique recording event and then the video within each pair
 n <- 25
 video_nms <- paste(paste(rep(paste("video", seq(1, n, 1), sep = "_"), each = 2), seq(1, 2, 1), sep = "_"), ".mp4", sep = "")
 video_nms
-
-# sapply(1:length(video_nms), function(i){
-#   
-#   length(grep(video_nms[i], combined_events$Media.file.name))
-#   
-# })
 
 ```
 
@@ -73,6 +68,8 @@ combined_events %>%
 
 ```
 
+# Interobserver reliability for categorical scoring
+
 For each unique recording event, arrange the events scored by each observer. Focus on the behavior (the ethogram categories) and the type (start or stop) for now.
 ```{r}
 
@@ -80,34 +77,283 @@ For each unique recording event, arrange the events scored by each observer. Foc
 rec_nms <- paste(paste("video", seq(1, n, 1), sep = "_"), "_", sep = "")
 rec_nms
 
-i <- 1
+# Unique subjects in the results
+unique(combined_events$Subject)
 
-pblapply(1:length(rec_nms), function(i){
+interobs_res <- data.table::rbindlist(pblapply(1:length(rec_nms), function(i){
 
-  combined_events %>% 
+  behav_sum <- combined_events %>% 
     dplyr::filter(
       grepl(rec_nms[i], Media.file.name)
     ) %>%
-    dplyr::select(Media.file.name, Behavior, Behavior.type, user_id) %>%
+    # Standardize subject names
     dplyr::mutate(
-      Behavior_and_type = paste(Behavior, Behavior.type, sep = "- ")
+      Subject = ifelse(Subject == "Adult female", "Female", Subject),
+      Subject = ifelse(Subject == "Adult male", "Male", Subject),
+      Subject = ifelse(Subject == "Juveniles_pooled", "Juveniles_Pooled", Subject)
+    ) %>% 
+    # Arrange the events by timestamps, and then by subject in order to avoid arbitrary ordering of events when the timestamps are the same across subjects and observers
+    dplyr::arrange(
+      -desc(Time)
     ) %>%
-    group_by(user_id) %>% 
+    dplyr::arrange(
+      -desc(Subject)
+    ) %>% 
+    dplyr::select(user_id, Subject, Behavior, Behavior.type) %>%
+    # Make a column of the behavior plus the type (start or stop)
+    dplyr::mutate(
+      Score = paste(Subject, Behavior, Behavior.type, sep = "-")
+    ) %>%
+    dplyr::select(-c(Subject, Behavior, Behavior.type)) %>%
+    group_by(user_id) %>%
     # Make a unique row id for pivoting within groups (users)
     dplyr::mutate(
       row = row_number()
     ) %>% 
     pivot_wider(
       names_from = "user_id",
-      values_from = c("Behavior", "Behavior.type", "Behavior_and_type")
-    ) %>%
-    View()
+      values_from = c("Score")
+    )
   
-  length(grep(video_nms[i], combined_events$Media.file.name))
+  # Calculate (unweighted) Cohen's kappa as interobserver reliability between two raters. A higher value of kappa indicates greater agreement, and a value of 1 indicates perfect agreement between raters. A statistically significant p-value at an alpha of 0.05 means that the observers agree more than expected by chance (null hypothesis of chance agreement is rejected)
+  kappa_res <- kappa2(
+    behav_sum %>% 
+      dplyr::select(`1`, `2`),
+    weight = "unweighted",
+    sort.levels = FALSE
+  )
+  
+  return(
+    data.frame(
+      recording_event = i,
+      kappa = round(kappa_res$value, 4),
+      p_val = round(kappa_res$p.value, 4)
+    )
+  )
 
-})
+}))
 
+# glimpse(interobs_res)
 
+interobs_res %>% 
+  print(nrows = nrow(.))
 
 ```
 
+Summarize the interobserver reliability results.
+```{r}
+
+# Mean and interquartile range of kappa
+interobs_res %>% 
+  dplyr::summarise(
+    mean_kappa = mean(kappa),
+    IQR_kappa = IQR(kappa)
+  )
+
+  # mean_kappa IQR_kappa
+# 1   0.609908    0.5714
+
+# Perfect agreement for 12 unique recording events, or 48% of the 25 recording events
+interobs_res %>% 
+  dplyr::filter(kappa == 1) %>% 
+  nrow(.)
+
+# Statistically significant agreement for 17 of the 25 recording events, or 68% of the recording events
+interobs_res %>% 
+  dplyr::filter(p_val <= 0.05) %>% 
+  nrow(.)
+
+# There were 6 videos for which we disagreed
+interobs_res %>% 
+  dplyr::filter(kappa < 1 & (p_val >= 0.05 | is.na(p_val))) %>% 
+  nrow(.)
+
+# See these kappa values
+interobs_res %>% 
+  dplyr::filter(kappa < 1 & (p_val >= 0.05 | is.na(p_val)))
+
+# Get the unique recording event IDs for the videos with disagreement
+disag <- interobs_res %>% 
+  dplyr::filter(kappa < 1 & (p_val >= 0.05 | is.na(p_val))) %>% 
+  pull(recording_event)
+
+```
+
+Check out the scoring results for the videos with disagreement.
+```{r}
+
+# I need unique recording events, not unique video names here
+disag_nms <- paste(paste("video", disag, sep = "_"), "_", sep = "")
+disag_nms
+
+disag_res <- data.table::rbindlist(pblapply(1:length(disag_nms), function(i){
+
+  behav_sum <- combined_events %>% 
+    dplyr::filter(
+      grepl(disag_nms[i], Media.file.name)
+    ) %>%
+    # Standardize subject names
+    dplyr::mutate(
+      Subject = ifelse(Subject == "Adult female", "Female", Subject),
+      Subject = ifelse(Subject == "Adult male", "Male", Subject),
+      Subject = ifelse(Subject == "Juveniles_pooled", "Juveniles_Pooled", Subject)
+    ) %>% 
+    # Arrange the events by timestamps, and then by subject in order to avoid arbitrary ordering of events when the timestamps are the same across subjects and observers
+    dplyr::arrange(
+      -desc(Time)
+    ) %>%
+    dplyr::arrange(
+      -desc(Subject)
+    ) %>% 
+    dplyr::select(user_id, Subject, Behavior, Behavior.type) %>%
+    # Make a column of the behavior plus the type (start or stop)
+    dplyr::mutate(
+      Score = paste(Subject, Behavior, Behavior.type, sep = "-")
+    ) %>%
+    dplyr::select(-c(Subject, Behavior, Behavior.type)) %>%
+    group_by(user_id) %>%
+    # Make a unique row id for pivoting within groups (users)
+    dplyr::mutate(
+      row = row_number()
+    ) %>% 
+    pivot_wider(
+      names_from = "user_id",
+      values_from = c("Score")
+    )
+
+  return(
+    behav_sum %>% 
+      dplyr::mutate(
+        recording_event = disag[i]
+      ) %>% 
+      dplyr::select(
+        recording_event, `1`, `2`
+      )
+  )
+
+}))
+
+disag_res %>%
+  View()
+
+```
+
+Summary of results for categorical scoring agreement: Both observers are in pretty high agreement (mean kappa of 0.60 and perfect agreement across 48% of the recording events), but there are two clear sources of variation that we need to standardize between observers. First, I'm separating juveniles pooled versus individual juveniles. We should standardize our scoring such that individual juveniles are scored as individuals, and when there is more than one juvenile, individuals are pooled. Second, for recording event 21, I did not score an entrance event for the male, so we need to doublecheck our respective scoring for this video.
+
+# Comparing timestamps between observers
+
+Next, we need to check the timestamps of events between observers, for the videos for which we had perfect agreement in categorical scores.
+```{r}
+
+# Get the unique recording event IDs for the videos with perfect agreement
+agree <- interobs_res %>% 
+  dplyr::filter(kappa == 1) %>% 
+  pull(recording_event)
+
+# I need unique recording events, not unique video names here
+agree_nms <- paste(paste("video", agree, sep = "_"), "_", sep = "")
+agree_nms
+
+agree_res <- data.table::rbindlist(pblapply(1:length(agree), function(i){
+
+  behav_sum <- combined_events %>% 
+    dplyr::filter(
+      grepl(agree_nms[i], Media.file.name)
+    ) %>%
+    # Standardize subject names
+    dplyr::mutate(
+      Subject = ifelse(Subject == "Adult female", "Female", Subject),
+      Subject = ifelse(Subject == "Adult male", "Male", Subject),
+      Subject = ifelse(Subject == "Juveniles_pooled", "Juveniles_Pooled", Subject)
+    ) %>% 
+    # Arrange the events by timestamps, and then by subject in order to avoid arbitrary ordering of events when the timestamps are the same across subjects and observers
+    dplyr::arrange(
+      -desc(Time)
+    ) %>%
+    dplyr::arrange(
+      -desc(Subject)
+    ) %>% 
+    dplyr::select(user_id, Subject, Behavior, Behavior.type, Time) %>%
+    # Make a column of the behavior plus the type (start or stop)
+    dplyr::mutate(
+      Score = paste(Subject, Behavior, Behavior.type, sep = "-")
+    ) %>%
+    dplyr::select(-c(Subject, Behavior, Behavior.type)) %>%
+    group_by(user_id) %>%
+    # Make a unique row id for pivoting within groups (users)
+    dplyr::mutate(
+      row = row_number()
+    ) %>% 
+    pivot_wider(
+      names_from = "user_id",
+      values_from = c("Score", "Time")
+    ) %>% 
+    # Calculate the time difference between observers (observer 1 used as the baseline)
+    dplyr::mutate(
+      time_diff_s = Time_1 - Time_2
+    ) %>% 
+    dplyr::mutate(
+      time_diff_ms = time_diff_s * 1000
+    )
+
+  return(
+    behav_sum %>% 
+      dplyr::mutate(
+        recording_event = agree[i]
+      ) %>% 
+      dplyr::select(
+        recording_event, names(.)[-grepl("recording_event", names(.))]
+      )
+  )
+
+}))
+
+agree_res %>% 
+  print(n = nrow(.))
+
+```
+
+Summarize the time differences.
+```{r}
+
+# For 45 of the 56 or 80% behavioral states scored across these videos, we had perfect agreement in timestamps
+agree_res %>% 
+  dplyr::filter(time_diff_ms == 0) %>% 
+  nrow()
+
+# We disagreed on timestamps for 11 or ~20% of the behavioral states
+agree_res %>%
+  dplyr::filter(abs(time_diff_ms) > 0) %>% 
+  nrow()
+
+# Min, mean, and max absolute time differences (in ms) for those 11 scores
+agree_res %>%
+  dplyr::filter(abs(time_diff_ms) > 0) %>% 
+  dplyr::summarise(
+    min_diff_ms = min(abs(time_diff_ms)),
+    mean_diff_ms = mean(abs(time_diff_ms)),
+    max_diff_ms = max(abs(time_diff_ms))
+  )
+
+  # min_diff_ms mean_diff_ms max_diff_ms
+# 1          40     215.0909         800
+
+```
+
+The timestamps in disagreement for behavioral states in which we had perfect agreement:
+```{r}
+
+agree_res %>%
+  dplyr::filter(abs(time_diff_ms) > 0)
+
+```
+
+Summary of timestamps comparison: Overall, both observers have high agreement in timestamps for the behaviors scored (when we had perfect agreement in behavioral scoring). There are some instances in which our respective timestamps are pretty different from one another, from around 40 ms to up to 800 ms difference. As a reference point, finches often produce calls ~ 100 - 200ms long, so 800 ms is the equivalent of a bird producing 4 calls. We should focus on doublechecking the videos for which our timestamps disagreed by 100 ms or more:
+
+The timestamps in disagreement by at least 100 ms:
+```{r}
+
+agree_res %>%
+  dplyr::filter(abs(time_diff_ms) > 100)
+
+```
