@@ -7,7 +7,7 @@ output: html_document
 
 Purpose: Calculate interobserver reliability for a small set of videos scored by two observers prior to scoring the full set of videos that will be used for the first round of ABISSMAL validation. See the script "validation_approach.Rmd" for more information about how videos were selected for validation. Videos were scored in BORIS using protocol written for video scoring, and an ethogram with four behaviors (exit, entrance, perching, and inside of the container) for coarse-grained validation. Each observer scored the same masked set of 25 unique recording events (50 videos total). 
 
-```{r libraries and paths}
+```{r libraries and paths, warning = FALSE, message = FALSE}
 
 rm(list = ls())
 
@@ -234,7 +234,7 @@ disag_res <- data.table::rbindlist(pblapply(1:length(disag_nms), function(i){
 }))
 
 disag_res %>%
-  View()
+  print(n = nrow(.))
 
 ```
 
