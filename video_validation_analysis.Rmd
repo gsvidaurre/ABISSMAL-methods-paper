@@ -1,0 +1,50 @@
+---
+title: "Interobserver reliability"
+author: "Grace Smith-Vidaurre"
+date: "2024-07-18"
+output: html_document
+---
+
+Purpose: Perform a validation analysis of automatically scored behaviors (e.g. behavioral inferences) obtained by ABISSMAL. The computational analyses available in ABISSMAL facilitate integrating data across movement sensors to derive coarse-grained behavioral inferences. Here, we will validate those behavioral inferences for a subsample of the full set of videos used in the methods manuscript, using a baseline dataset obtained by manual video scoring to obtain coarse-grained behavioral states for adult birds and juveniles. The current plan for this validation analysis includes 1) assessing whether the automated and manual scoring return similar levels of overall activity per unique recording event, 2) whether the automated and manual scoring return similar levels of overall activity per behavioral state in each unique recording event, and 3) the degree to which the timestamps for these automated and manual scores agree with one another (this will be a bit tricky given that some of the movement sensors will detect movement before the videos).
+
+The manually scored data needs to be concatenated and checked prior to running the validation analysis. Also, Summer noticed some video recording events had videos switched in order, so we have to pre-process the manually scored dataset to fix these issues for the videos she caught that had this issue.
+
+Finally, the validation analysis will be planned out and run with a random subsample of the videos used for this analysis.
+
+```{r libraries and paths, warning = FALSE, message = FALSE}
+
+rm(list = ls())
+
+library(tidyverse)
+library(pbapply)
+library(data.table)
+library(irr)
+library(lubridate)
+
+path <- "~/Desktop/ABISSMAL_BORIS_InterObserverReliability"
+
+```
+
+Read in all of the spreadsheets across both observers. Each spreadsheet represents events scored for one of 25 unique recording events, or 25 pairs of videos recorded by motion-detection.
+```{r}
+
+# Print all of the directories with video files
+files <- list.files(path, pattern = ".csv$", full.names = TRUE)
+length(files)
+
+combined_events <- data.table::rbindlist(pblapply(1:length(files), function(i){
+  
+  read.csv(files[i])
+
+}))
+
+glimpse(combined_events)
+
+# There should be 25 unique recording events or pairs of media file names
+# The 50 masked videos have numeric ids for the unique recording event and then the video within each pair
+n <- 25
+video_nms <- paste(paste(rep(paste("video", seq(1, n, 1), sep = "_"), each = 2), seq(1, 2, 1), sep = "_"), ".mp4", sep = "")
+video_nms
+
+```
+
