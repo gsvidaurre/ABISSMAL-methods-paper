@@ -291,3 +291,5 @@ file.copy(
 ```
 
 These masked files can now be copied to another hard drive for sharing with observer(s) who will score these videos.
+
+Summer Eckhardt scored the masked videos in BORIS using an ethogram that the group of co-authors developed for scoring coarse-grained behavioral states (perching, entering, exiting, inside of the container, or no birds inside of the container) for different subjects (adult female, adult male, juveniles). More information about the ethogram and manual video scoring is stored in a standard operating protocol for BORIS video scoring for this project.
