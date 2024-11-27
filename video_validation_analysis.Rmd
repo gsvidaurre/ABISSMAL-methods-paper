@@ -11,6 +11,12 @@ The manually scored data needs to be concatenated and checked prior to running t
 
 Finally, the validation analysis will be planned out and run with a random subsample of the videos used for this analysis.
 
+```{r}
+
+knitr::opts_knit$set(eval = TRUE, echo = TRUE)
+
+```
+
 ```{r package and paths, warning = FALSE, message = FALSE}
 
 # Clean the global environment
@@ -20,40 +26,77 @@ X <- c("tidyverse", "pbapply", "data.table")
 
 invisible(lapply(X, library, character.only = TRUE))
 
-# Path to the BORIS spreadsheets
-path <- "~/Desktop/ABISSMAL_validation_data/Manual_Scoring_Results"
+# Path to the aggregated BORIS spreadsheet in wide format across all video recording events
+# path <- "~/Desktop/ABISSMAL_validation_data/Manual_Scoring_Results"
+path <- "/home/gsvidaurre/Desktop/MANUSCRIPTS/Prep/ABISSMAL_MethodsPaper/ABISSMAL_BORIS_ManualScoringResults/Manual_Scoring_Results"
 
 ```
 
-Read in all of the spreadsheets and concatenate them into a single data frame.
+Read in the aggregated manual scoring spreadsheet in which each row is a unique behavioral state per subject within a recording event.
 ```{r}
 
-# Print all of the directories with video files
-files <- list.files(path, pattern = ".csv$", full.names = TRUE)
-# head(files)
-length(files)
+manual_scoring <- read.csv(file.path(path, "BORIS_ManualScoring_Aggregated.csv"))
+glimpse(manual_scoring)
 
-# Read in the very first spreadsheet and save the column names for the loop below (to organize data across all spreadsheets)
-keep_nms <- names(read.csv(files[1]))
-keep_nms
+# View(manual_scoring)
 
-# i <- 1 # testing
-combined_events <- data.table::rbindlist(pblapply(1:length(files), function(i){
+# Replace dashes with underscores in the observation
+manual_scoring$Observation.id <- gsub("-", "_", manual_scoring$Observation.id)
 
-  read.csv(files[i])
+# Also replace observation IDs with duplicated "Observation"
+manual_scoring$Observation.id <- gsub("Observation_Observation", "Observation", manual_scoring$Observation.id)
 
-}))
+# Also replace observation IDs with duplicated "Observation"
+manual_scoring$Observation.id <- gsub("Observatin", "Observation", manual_scoring$Observation.id)
 
-glimpse(combined_events)
-View(combined_events)
+# Which recording events are missing from this spreadsheet?
+# x <- 9849 # testing
+numeric_video_ids <- sapply(1:nrow(manual_scoring), function(x){
+  
+  tmp <- strsplit(manual_scoring$Observation.id[x], split = "_")[[1]][2]
+  
+  return(as.numeric(tmp))
+  
+}, USE.NAMES = FALSE)
+
+# No NAs in this vector
+which(is.na(unique(numeric_video_ids)))
+
+# Which unique recording events are missing from the current aggregated spreadsheet?
+all_video_ids <- seq(1, 4045, 1)
+
+wh <- which(!all_video_ids %in% numeric_video_ids)
+
+# These are the video recording IDs that need to be rescored and exported in aggregated format from BORIS before downstream analysis
+all_video_ids[wh]
+
+# Check that this is true
+pat <- paste("Observation", all_video_ids[wh], sep = "_")
+pat
+
+# Search for this pattern in the data frame to be sure. We found no instances of these BORIS observations in the data frame, confirming that these files need to be scored/exported again
+grep(paste(paste("^", pat, "$", sep = ""), collapse = "|"), manual_scoring$Observation.id)
+
+# Export the information for videos that need to be scored/exported again
+pat %>% 
+  write.table(., file = file.path(path, "videos_for_aggregatedExport.txt"), sep = "\t", col.names = FALSE, row.names = FALSE, append = FALSE)
 
 ```
 
 Next steps:
 
-1. We need to do data wrangling to make this data frame of BORIS scoring winder (each row should be a behavioral state scored for a unique subject) to match the data structure returned by the ABISSMAL computational analyses
+1. Summer will work on rescoring and exporting the 17 videos above from BORIS in order to have those spreadsheets in aggregated format (each row as a unique behavioral state).
 
-2. We need to choose a subsample of these videos to develop the validation analysis pipeline
+2. We need to choose a subsample of these videos to develop the validation analysis pipeline.
+
+```{r}
+
+
+
+```
+
+
+
 
 3. Start writing out the steps of the validation analysis, run these with the subsample of videos chosen above
 
