@@ -111,13 +111,18 @@ i) Data Processing:
 
   - Get the manual scoring data from BORIS (in progress, nearly done)
 
-  - Get the automated behavioral scoring used in the current methods manuscript, as well as the raw data used for these analyses
+  - Get the raw data across movement sensors used for analyses in the current methods manuscript
+  
+  - Index the raw movement sensor data by the start and end timestamps of all of the videos used for manual scoring for validation
+  
+  - Perform automated behavioral scoring of the indexed raw movement sensor data, and iterate over a range of temporal thresholds used for clustering detections across sensors (for pre-processing, use the same parameters as in the methods manuscript)
 
   - Check that the automated and manual datasets are in similar format
 
 ii) Analyzing overall patterns of activity:
 
   - Do both scoring methods return similar levels of activity for each unique recording event?
+  - Plot the levels of activity for each recording event by each method against each other, and repeat this process for different temporal thresholds used for the automated scoring
 
 iii) Analyzing overall patterns of activity by behavioral state:
 
@@ -126,8 +131,6 @@ iii) Analyzing overall patterns of activity by behavioral state:
 iv) How do the timestamps of scored behavioral states compare between methods?
 
 *** As the best methods comparison: how badly are our statistical/biological inferences skewed using one method or the other? Iterate over parameters that we use for the automated scoring, especially the temporal thresholds used for clustering
-
-
 
 
 5. Run the full validation analysis pipeline with all 4045 video recording events
