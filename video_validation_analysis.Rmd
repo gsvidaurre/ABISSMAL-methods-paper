@@ -30,6 +30,8 @@ invisible(lapply(X, library, character.only = TRUE))
 # path <- "~/Desktop/ABISSMAL_validation_data/Manual_Scoring_Results"
 path <- "/home/gsvidaurre/Desktop/MANUSCRIPTS/Prep/ABISSMAL_MethodsPaper/ABISSMAL_BORIS_ManualScoringResults/Manual_Scoring_Results"
 
+seed <- 888
+
 ```
 
 Read in the aggregated manual scoring spreadsheet in which each row is a unique behavioral state per subject within a recording event.
@@ -87,19 +89,45 @@ Next steps:
 
 1. Summer will work on rescoring and exporting the 17 videos above from BORIS in order to have those spreadsheets in aggregated format (each row as a unique behavioral state).
 
-2. We need to choose a subsample of these videos to develop the validation analysis pipeline.
+2. Data pre-processing of the switched recording events that Summer identified
+
+3. We need to choose a subsample of these videos to develop the validation analysis pipeline.
 
 ```{r}
 
+# Randomly select 50 video recording events from the current version of the aggregated manual scoring results in wide format
+set.seed(seed)
+subsample <- sample(manual_scoring$Observation.id, 50, replace = FALSE)
 
+subsample
 
 ```
 
+4. Start writing out the steps of the validation analysis, run these with the subsample of videos chosen above
+
+Pseudocode for the analysis:
+
+i) Data Processing:
+
+  - Get the manual scoring data from BORIS (in progress, nearly done)
+
+  - Get the automated behavioral scoring used in the current methods manuscript, as well as the raw data used for these analyses
+
+  - Check that the automated and manual datasets are in similar format
+
+ii) Analyzing overall patterns of activity:
+
+  - Do both scoring methods return similar levels of activity for each unique recording event?
+
+iii) Analyzing overall patterns of activity by behavioral state:
+
+  - Do both scoring methods return similar levels of activity for behavioral state across each unique recording event?
+
+iv) How do the timestamps of scored behavioral states compare between methods?
+
+*** As the best methods comparison: how badly are our statistical/biological inferences skewed using one method or the other? Iterate over parameters that we use for the automated scoring, especially the temporal thresholds used for clustering
 
 
 
-3. Start writing out the steps of the validation analysis, run these with the subsample of videos chosen above
-
-4. Data pre-processing of the switched recording events that Summer identified
 
 5. Run the full validation analysis pipeline with all 4045 video recording events
