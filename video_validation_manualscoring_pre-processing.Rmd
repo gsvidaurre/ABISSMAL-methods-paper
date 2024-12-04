@@ -1,0 +1,115 @@
+---
+title: "Pre-process manual scoring data"
+output: html_document
+date: "2024-12-04"
+---
+
+Purpose: Pre-process the spreadsheet containing aggregated manual scoring results from all the videos we're using for validation. This pre-processing will include fixing typos, and checking which videos needed to be rescored for aggregated export (previously we had exported in tabular format from BORIS).
+
+```{r package and paths, warning = FALSE, message = FALSE}
+
+# Clean the global environment
+rm(list = ls())
+
+X <- c("tidyverse", "pbapply", "data.table")
+
+invisible(lapply(X, library, character.only = TRUE))
+
+# Path to the aggregated BORIS spreadsheet in wide format across all video recording events
+path <- "~/Desktop/ABISSMAL_validation_data"
+
+seed <- 888
+
+```
+
+Read in the aggregated manual scoring spreadsheet in which each row is a unique behavioral state per subject within a recording event.
+```{r}
+
+manual_scoring <- read.csv(file.path(path, "BORIS_ManualScoring_Aggregated.csv"))
+glimpse(manual_scoring)
+
+# View(manual_scoring)
+
+```
+
+Which video recording events need to be rescored and exported in aggregated format?
+```{r}
+
+# Replace dashes with underscores in the observation
+manual_scoring$Observation.id <- gsub("-", "_", manual_scoring$Observation.id)
+
+# Also replace observation IDs with duplicated "Observation"
+manual_scoring$Observation.id <- gsub("Observation_Observation", "Observation", manual_scoring$Observation.id)
+
+# Also replace other typos in observation IDs
+manual_scoring$Observation.id <- gsub("Observatin", "Observation", manual_scoring$Observation.id)
+
+# Which recording events are missing from this spreadsheet?
+# x <- 9849 # testing
+numeric_video_ids <- sapply(1:nrow(manual_scoring), function(x){
+  
+  tmp <- strsplit(manual_scoring$Observation.id[x], split = "_")[[1]][2]
+  
+  return(as.numeric(tmp))
+  
+}, USE.NAMES = FALSE)
+
+# No NAs in this vector
+which(is.na(unique(numeric_video_ids)))
+
+# Which unique recording events are missing from the current aggregated spreadsheet?
+all_video_ids <- seq(1, 4045, 1)
+
+wh <- which(!all_video_ids %in% numeric_video_ids)
+
+# These are the video recording IDs that need to be rescored and exported in aggregated format from BORIS before downstream analysis
+all_video_ids[wh]
+
+# Check that this is true
+pat <- paste("Observation", all_video_ids[wh], sep = "_")
+pat
+
+# Search for this pattern in the data frame to be sure. We found no instances of these BORIS observations in the data frame, confirming that these files need to be scored/exported again
+grep(paste(paste("^", pat, "$", sep = ""), collapse = "|"), manual_scoring$Observation.id)
+
+# Export the information for videos that need to be scored/exported again
+pat %>% 
+  write.table(., file = file.path(path, "videos_for_aggregatedExport.txt"), sep = "\t", col.names = FALSE, row.names = FALSE, append = FALSE)
+
+```
+
+Summer used this list to rescore 17 videos and export them to aggregated format, then we read the whole aggregated .csv back in again before fixing typos.
+
+Fix typos in the Observation column and write out the spreadsheet with these typos fixed.
+```{r}
+
+# Replace dashes with underscores in the observation
+manual_scoring$Observation.id <- gsub("-", "_", manual_scoring$Observation.id)
+
+# Also replace observation IDs with duplicated "Observation"
+manual_scoring$Observation.id <- gsub("Observation_Observation", "Observation", manual_scoring$Observation.id)
+
+# Also replace other typos in observation IDs
+manual_scoring$Observation.id <- gsub("Observatin|observation|Observaton|Observsation|Observtion", "Observation", manual_scoring$Observation.id)
+
+# Check that this column has no more typos
+# x <- 1
+labels <- unique(sapply(1:nrow(manual_scoring), function(x){
+  
+  strsplit(manual_scoring$Observation.id[x], split = "_")[[1]][1]
+  
+}))
+
+# Looks good
+labels
+
+```
+
+Write out the spreadsheet with updated typos.
+```{r}
+
+manual_scoring %>% 
+  write.csv(file.path(path, "BORIS_ManualScoring_Aggregated_pre-processed.csv"), row.names = FALSE)
+
+```
+

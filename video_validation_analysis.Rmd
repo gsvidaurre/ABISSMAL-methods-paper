@@ -27,8 +27,10 @@ X <- c("tidyverse", "pbapply", "data.table")
 invisible(lapply(X, library, character.only = TRUE))
 
 # Path to the aggregated BORIS spreadsheet in wide format across all video recording events
-# path <- "~/Desktop/ABISSMAL_validation_data/Manual_Scoring_Results"
-path <- "/home/gsvidaurre/Desktop/MANUSCRIPTS/Prep/ABISSMAL_MethodsPaper/ABISSMAL_BORIS_ManualScoringResults/Manual_Scoring_Results"
+path <- "~/Desktop/ABISSMAL_validation_data"
+
+# Path to the combined raw movement sensor data
+sensor_path <- file.path(path, "raw_combined")
 
 seed <- 888
 
@@ -37,83 +39,70 @@ seed <- 888
 Read in the aggregated manual scoring spreadsheet in which each row is a unique behavioral state per subject within a recording event.
 ```{r}
 
-manual_scoring <- read.csv(file.path(path, "BORIS_ManualScoring_Aggregated.csv"))
+manual_scoring <- read.csv(file.path(path, "BORIS_ManualScoring_Aggregated_pre-processed.csv"))
 glimpse(manual_scoring)
 
 # View(manual_scoring)
-
-# Replace dashes with underscores in the observation
-manual_scoring$Observation.id <- gsub("-", "_", manual_scoring$Observation.id)
-
-# Also replace observation IDs with duplicated "Observation"
-manual_scoring$Observation.id <- gsub("Observation_Observation", "Observation", manual_scoring$Observation.id)
-
-# Also replace observation IDs with duplicated "Observation"
-manual_scoring$Observation.id <- gsub("Observatin", "Observation", manual_scoring$Observation.id)
-
-# Which recording events are missing from this spreadsheet?
-# x <- 9849 # testing
-numeric_video_ids <- sapply(1:nrow(manual_scoring), function(x){
-  
-  tmp <- strsplit(manual_scoring$Observation.id[x], split = "_")[[1]][2]
-  
-  return(as.numeric(tmp))
-  
-}, USE.NAMES = FALSE)
-
-# No NAs in this vector
-which(is.na(unique(numeric_video_ids)))
-
-# Which unique recording events are missing from the current aggregated spreadsheet?
-all_video_ids <- seq(1, 4045, 1)
-
-wh <- which(!all_video_ids %in% numeric_video_ids)
-
-# These are the video recording IDs that need to be rescored and exported in aggregated format from BORIS before downstream analysis
-all_video_ids[wh]
-
-# Check that this is true
-pat <- paste("Observation", all_video_ids[wh], sep = "_")
-pat
-
-# Search for this pattern in the data frame to be sure. We found no instances of these BORIS observations in the data frame, confirming that these files need to be scored/exported again
-grep(paste(paste("^", pat, "$", sep = ""), collapse = "|"), manual_scoring$Observation.id)
-
-# Export the information for videos that need to be scored/exported again
-pat %>% 
-  write.table(., file = file.path(path, "videos_for_aggregatedExport.txt"), sep = "\t", col.names = FALSE, row.names = FALSE, append = FALSE)
 
 ```
 
 Next steps:
 
-1. Summer will work on rescoring and exporting the 17 videos above from BORIS in order to have those spreadsheets in aggregated format (each row as a unique behavioral state).
+1. Data pre-processing of the switched recording events that Summer identified. Look at the spreadsheet called "BORIS_VideoList_TimeFlipped.csv". We could i) exclude these videos from analyses, or ii) we could try to flip the manual scores given the timestamps of the scores and the videos themselves, or iii) if one video has extremely short duration, then drop the scores for that video in the pair. TKTK keep thinking about a solution 
 
-2. Data pre-processing of the switched recording events that Summer identified
-
-3. We need to choose a subsample of these videos to develop the validation analysis pipeline.
+2. We need to choose a subsample of these videos to develop the validation analysis pipeline.
 
 ```{r}
 
 # Randomly select 50 video recording events from the current version of the aggregated manual scoring results in wide format
+
+# First get all of the unique BORIS Observation IDs that correspond to unique recording events
+unique_obs_ids <- unique(manual_scoring$Observation.id)
+head(unique_obs_ids)
+
+# There should be 4045 Observation IDs to match the unique recording events that Summer scored, looks good
+length(unique_obs_ids)
+
 set.seed(seed)
-subsample <- sample(manual_scoring$Observation.id, 50, replace = FALSE)
+subsample <- sample(unique_obs_ids, 50, replace = FALSE)
 
 subsample
 
 ```
 
-4. Start writing out the steps of the validation analysis, run these with the subsample of videos chosen above
+3. Start writing out the steps of the validation analysis, run these with the subsample of videos chosen above
 
 Pseudocode for the analysis:
 
 i) Data Processing:
 
-  - Get the manual scoring data from BORIS (in progress, nearly done)
+  - Get the manual scoring data from BORIS in aggregated format (done)
+  
+  - Decide how to handle the time-flipped videos (in progress)
 
   - Get the raw data across movement sensors used for analyses in the current methods manuscript
   
+```{r}
+
+# The movement sensor data that we are using here is the raw data that we have used in the methods manuscript, and it's already been combined across days of data collection using ABISSMAL functions. We have one spreadsheet per sensor type, and the beam breaker spreadsheet contains data for 2 pairs of beam breakers
+list.files(sensor_path)
+
+# We will use this data to index the raw movement sensor data by the timestamps of the videos that Summer scored. The spreadsheet for the video recording events should have the timestamps or at least the start time for each unique recording event. The timestamp column in this spreadsheet should correspond to the time at which the video camera detected motion and began recording the post-movement video. TKTK need to check the Video module code for ABISSMAL to verify. Onve this is verified, then we can decide how to proceed with timestamps in this spreadsheet plus the known durations of each video in each unique recording event (may need to do more data wrangling to figure out durations). A quick check of the spreadsheet below indicates we should use the column of Media File Duration to extract the exact duration of each video in each unique recording event (lots of variability in the duration of the pre-movement video recorded using the ring buffer)
+video_events <- read.csv(file.path(sensor_path, "combined_raw_data_Video.csv"))
+glimpse(video_events)
+
+View(video_events)
+
+```
+
+  
   - Index the raw movement sensor data by the start and end timestamps of all of the videos used for manual scoring for validation
+  
+```{r}
+
+
+
+```
   
   - Perform automated behavioral scoring of the indexed raw movement sensor data, and iterate over a range of temporal thresholds used for clustering detections across sensors (for pre-processing, use the same parameters as in the methods manuscript)
 
