@@ -42,7 +42,13 @@ Read in the aggregated manual scoring spreadsheet in which each row is a unique 
 manual_scoring <- read.csv(file.path(path, "BORIS_ManualScoring_Aggregated_pre-processed.csv"))
 glimpse(manual_scoring)
 
-# View(manual_scoring)
+```
+
+Read in the spreadsheet for unmasking the video file names.
+```{r}
+
+unmask_nms <- read.csv(file.path(path, "unmasked_video_names.csv"))
+glimpse(unmask_nms)
 
 ```
 
@@ -76,46 +82,187 @@ Pseudocode for the analysis:
 
 i) Data Processing:
 
-  - Get the manual scoring data from BORIS in aggregated format (done)
-  
-  - Decide how to handle the time-flipped videos (in progress)
+- Get the manual scoring data from BORIS in aggregated format (done)
 
-  - Get the raw data across movement sensors used for analyses in the current methods manuscript
+- Decide how to handle the time-flipped videos (in progress)
+
+- Unmask the video file names used for manual scoring
+
+```{r}
+
+manual_scoring_ss <- manual_scoring %>% 
+  dplyr::filter(Observation.id %in% subsample)
+
+dim(manual_scoring_ss)
+
+# Checking filtering, looks good
+# all(unique(manual_scoring_ss$Observation.id) %in% subsample)
+# all(subsample %in% unique(manual_scoring_ss$Observation.id))
+
+# Add the unmasked video file names to each observation in the manual scoring spreadsheet
+# i <- 1 # testing
+manual_scoring_nm <- data.table::rbindlist(pblapply(1:nrow(manual_scoring_ss), function(i){
   
+  # Get the masked video recording event ID
+  masked_nm <- manual_scoring_ss$masked_video_recording_event_ID[i]
+  # masked_nm
+  
+  # Use the masked video recording event ID to find the unmasked recording event ID per row
+  unmasked_nm <- unmask_nms %>% 
+    dplyr::filter(masked_name == masked_nm) %>% 
+    pull(videos)
+  
+  # Add the unmasked name back to the manual scoring data frame
+  # The unmasked name will be one of the two unique video files per unique recording event (we don't need both names for later steps)
+  return(
+    manual_scoring_ss[i, ] %>% 
+      dplyr::mutate(
+        unmasked_video_file = unmasked_nm
+      )
+  )
+  
+}))
+
+# Select a few rows at random and manually check the unmasking results
+glimpse(manual_scoring_nm)
+dim(manual_scoring_nm)
+View(manual_scoring_nm)
+
+```
+
+Get the raw data across movement sensors used for analyses in the current methods manuscript.
 ```{r}
 
 # The movement sensor data that we are using here is the raw data that we have used in the methods manuscript, and it's already been combined across days of data collection using ABISSMAL functions. We have one spreadsheet per sensor type, and the beam breaker spreadsheet contains data for 2 pairs of beam breakers
 list.files(sensor_path)
 
-# We will use this data to index the raw movement sensor data by the timestamps of the videos that Summer scored. The spreadsheet for the video recording events should have the timestamps or at least the start time for each unique recording event. The timestamp column in this spreadsheet should correspond to the time at which the video camera detected motion and began recording the post-movement video. TKTK need to check the Video module code for ABISSMAL to verify. Onve this is verified, then we can decide how to proceed with timestamps in this spreadsheet plus the known durations of each video in each unique recording event (may need to do more data wrangling to figure out durations). A quick check of the spreadsheet below indicates we should use the column of Media File Duration to extract the exact duration of each video in each unique recording event (lots of variability in the duration of the pre-movement video recorded using the ring buffer)
-video_events <- read.csv(file.path(sensor_path, "combined_raw_data_Video.csv"))
+# We will use this data to index the raw movement sensor data by the timestamps of the videos that Summer scored. The spreadsheet for the video recording events contains timestamp columns that correspond to the time at which the video camera detected motion and began recording the post-movement video (this timestamp is also in the filenames of each of the videos per unique recording event).
+video_events <- read.csv(file.path(sensor_path, "combined_raw_data_Video.csv")) %>% # Make sure that the timestamps are in the right format
+  dplyr::mutate(
+    timestamp_ms = as.POSIXct(format(as.POSIXct(timestamp_ms, tz = ""), "%Y-%m-%d %H:%M:%OS6")))
+
 glimpse(video_events)
 
-View(video_events)
+# View(video_events)
+
+# In the BORIS manual scoring data, we can use the column of Media File Duration to extract the exact duration of each video in each unique recording event (lots of variability in the duration of the pre-movement video recorded using the ring buffer)
 
 ```
 
-  
-  - Index the raw movement sensor data by the start and end timestamps of all of the videos used for manual scoring for validation
-  
+Use the unmasked video file names to get the start timestamp of the post-movement video in each unique recording event in the spreadsheet of video recording events recorded by ABISSMAL. In this metadata spreadsheet for the video recordings he column timestamp_ms that holds the time when the camera detected motion and started recording video. Use these timestamps along with the durations of the pre- and post-movement videos from the aggregated BORIS manual scoring spreadsheet to obtain the start and end timestamps of each unique recording event (the pre- and post-movement videos together).
 ```{r}
 
+# Get the unique prefixes for unmasked video recording event names
+unique_video_pats <- manual_scoring_nm %>% 
+  pull(unmasked_video_file) %>% 
+  gsub("pre_trigger.mp4|_post_trigger.mp4", "", .) %>% 
+  unique()
 
+unique_video_pats
+
+# Filter the video recording event metdata spreadsheet to obtain the start timestamps for the post-movement video per unique recording event
+# i <- 1
+recording_event_ts <- data.table::rbindlist(pblapply(1:length(unique_video_pats), function(i){
+  
+  # Get the start timestamp for the post-movement video of the current unique recording event
+  start_post <- video_events %>% 
+    dplyr::filter(grepl(unique_video_pats[i], video_file_name)) %>% 
+    pull(timestamp_ms) %>% 
+    unique()
+  
+  # Get the duration of each video file in the given recording event
+  tmp <- manual_scoring_nm %>% 
+    dplyr::filter(grepl(unique_video_pats[i], unmasked_video_file)) %>% 
+    separate(
+      ., col = "Media.duration..s.", into = c("video_1_dur", "video_2_dur"), sep = ";", remove = FALSE
+    ) %>% 
+    dplyr::select(c("video_1_dur", "video_2_dur")) %>% 
+    distinct() %>%
+    # Convert the duration in seconds to numeric
+    dplyr::mutate(
+      video_1_dur = as.numeric(video_1_dur),
+      video_2_dur = as.numeric(video_2_dur)
+    )
+  
+  # Create the start timestamp for this unique recording event by subtracting the duration of the first video in this event from the timestamp of the post-motion video
+  start_event <- start_post - tmp$video_1_dur
+  # start_event
+
+  # Create the end timestamp for this unique recording event by adding the duration of the second video to the start timestamp of the post-motion video
+  end_event <- start_post + tmp$video_2_dur
+  # end_event
+  
+  # Check that the duration of these timestamps yields the same duration as the sum of the media durations in the BORIS spreadsheet
+  offset <- as.numeric(end_event - start_event) - (tmp$video_1_dur + tmp$video_2_dur)
+  
+  if(offset < 0.01){
+    
+    return(
+      data.frame(
+        unique_recording_event_ID = unique_video_pats[i],
+        start_event = start_event,
+        end_event = end_event
+      )
+    )
+    
+  } else {
+    
+    stop("The video durations do not line up")
+    
+  }
+  
+}))
+
+# We can use the timestamps to index the raw detections for all other movement sensors for validation
+glimpse(recording_event_ts)
+View(recording_event_ts)
 
 ```
-  
-  - Perform automated behavioral scoring of the indexed raw movement sensor data, and iterate over a range of temporal thresholds used for clustering detections across sensors (for pre-processing, use the same parameters as in the methods manuscript)
 
-  - Check that the automated and manual datasets are in similar format
+Index the raw RFID movement sensor data by the start and end timestamps of all of the videos used for manual scoring for validation.
+```{r}
+
+# Read in the raw and combined RFID detections
+rfid_events <- read.csv(file.path(sensor_path, "combined_raw_data_RFID.csv")) %>% # Make sure that the timestamps are in the right format
+  dplyr::mutate(
+    timestamp_ms = as.POSIXct(format(as.POSIXct(timestamp_ms, tz = ""), "%Y-%m-%d %H:%M:%OS6")))
+
+glimpse(rfid_events)
+
+# Filter the RFID detections to retain only those that occurred within the duration of the given unique recording events TKTK need to add some buffer time before and after, need to be careful about this decision
+
+# recording_event_ts$start_event[1]
+# [1] "2023-08-07 10:21:21 EDT"
+
+# recording_event_ts$end_event[1]
+# [1] "2023-08-07 10:21:34 EDT"
+
+View(rfid_events %>% 
+       dplyr::filter(month == 8 & day == 7))
+
+# TKTK need to be inside of a loop
+rfid_events %>% 
+  # glimpse()
+  dplyr::filter(timestamp_ms >= recording_event_ts$start_event - 5 & timestamp_ms <= recording_event_ts$end_event + 5) %>% 
+  dplyr::select(timestamp_ms)
+
+```
+
+
+
+
+- Perform automated behavioral scoring of the indexed raw movement sensor data, and iterate over a range of temporal thresholds used for clustering detections across sensors (for pre-processing, use the same parameters as in the methods manuscript)
+
+- Check that the automated and manual datasets are in similar format
 
 ii) Analyzing overall patterns of activity:
 
-  - Do both scoring methods return similar levels of activity for each unique recording event?
-  - Plot the levels of activity for each recording event by each method against each other, and repeat this process for different temporal thresholds used for the automated scoring
+- Do both scoring methods return similar levels of activity for each unique recording event?
+- Plot the levels of activity for each recording event by each method against each other, and repeat this process for different temporal thresholds used for the automated scoring
 
 iii) Analyzing overall patterns of activity by behavioral state:
 
-  - Do both scoring methods return similar levels of activity for behavioral state across each unique recording event?
+- Do both scoring methods return similar levels of activity for behavioral state across each unique recording event?
 
 iv) How do the timestamps of scored behavioral states compare between methods?
 

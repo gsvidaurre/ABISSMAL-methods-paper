@@ -105,10 +105,41 @@ labels
 
 ```
 
+Create a new column in the manual scoring spreadsheet that contains the unique recording event ID.
+```{r}
+
+manual_scoring2 <- manual_scoring %>%
+  # Separate each video within the Source column into two separate columns
+  # Throws a warning for 3 row indices that I checked, and all will have an NA in the video_2 column because only a single video is listed in the Source column
+  separate(col = Source, sep = ";", into = c("video_1", "video_2"), remove = FALSE) %>% 
+  # glimpse()
+  dplyr::mutate(
+    masked_video_recording_event_ID = gsub("C:/Users/summe/OneDrive/Desktop/Video Scoring/Videos/", "", video_1),
+    masked_video_recording_event_ID = gsub("C:/Users/summe/OneDrive/Desktop/Video Scoring/Aggregated Events/Rescore/", "", masked_video_recording_event_ID),
+    # Need to escape each blackslash in the pattern to replace with a backslash
+    masked_video_recording_event_ID = gsub("player #1:Videos\\\\", "", masked_video_recording_event_ID),
+    masked_video_recording_event_ID = gsub("player #1:", "", masked_video_recording_event_ID)
+  )
+
+glimpse(manual_scoring2)
+
+# There should be no NAs in the new ID column, looks good
+which(is.na(manual_scoring2$masked_video_recording_event_ID))
+
+# Each video recording name in the new ID column should be found in the Source column for the same row, looks good
+all(sapply(1:nrow(manual_scoring2), function(x){
+  
+  grepl(manual_scoring2$masked_video_recording_event_ID[x], manual_scoring2$Source[x])
+  
+}))
+
+
+```
+
 Write out the spreadsheet with updated typos.
 ```{r}
 
-manual_scoring %>% 
+manual_scoring2 %>% 
   write.csv(file.path(path, "BORIS_ManualScoring_Aggregated_pre-processed.csv"), row.names = FALSE)
 
 ```
