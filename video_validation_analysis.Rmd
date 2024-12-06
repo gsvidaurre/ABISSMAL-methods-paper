@@ -22,15 +22,32 @@ knitr::opts_knit$set(eval = TRUE, echo = TRUE)
 # Clean the global environment
 rm(list = ls())
 
-X <- c("tidyverse", "pbapply", "data.table")
+X <- c("tidyverse", "pbapply", "data.table", "tidyquant")
 
 invisible(lapply(X, library, character.only = TRUE))
+
+# Load the custom functions for computational analyses with ABISSMAL
+code_path <- "~/Desktop/GitHub_repos/ABISSMAL/R"
+code <- list.files(code_path, pattern = ".R$", full.names = TRUE)
+
+invisible(lapply(1:length(code), function(i){
+  source(code[i])
+}))
 
 # Path to the aggregated BORIS spreadsheet in wide format across all video recording events
 path <- "~/Desktop/ABISSMAL_validation_data"
 
 # Path to the combined raw movement sensor data
 sensor_path <- file.path(path, "raw_combined")
+
+# Initialize a folder where we will save the indexed raw data for the validation analyses
+indexed_dir <- "indexed_raw_data"
+indexed_path <- file.path(path, indexed_dir)
+
+# Create this folder if it doesn't already exist
+if(!dir.exists(indexed_path)){
+  dir.create(indexed_path)
+}
 
 seed <- 888
 
@@ -54,7 +71,9 @@ glimpse(unmask_nms)
 
 Next steps:
 
-1. Data pre-processing of the switched recording events that Summer identified. Look at the spreadsheet called "BORIS_VideoList_TimeFlipped.csv". We could i) exclude these videos from analyses, or ii) we could try to flip the manual scores given the timestamps of the scores and the videos themselves, or iii) if one video has extremely short duration, then drop the scores for that video in the pair. TKTK keep thinking about a solution 
+1a. Data pre-processing of the switched recording events that Summer identified. Look at the spreadsheet called "BORIS_VideoList_TimeFlipped.csv". We could i) exclude these videos from analyses, or ii) we could try to flip the manual scores given the timestamps of the scores and the videos themselves, or iii) if one video has extremely short duration, then drop the scores for that video in the pair. TKTK keep thinking about a solution
+
+1b. Figure out if we can discriminate videos for which video recording was initialized by daily animal checks (a hand opening the nest container), check the notes column of the aggregated .csv. This will be scored as no birds inside of the containr but may have a very high pixel number that changed. Summer kept track in her log, but this only happened 2-3 times, check the notes of the BORIS .csv, recording event 2322 
 
 2. We need to choose a subsample of these videos to develop the validation analysis pipeline.
 
@@ -187,7 +206,7 @@ recording_event_ts <- data.table::rbindlist(pblapply(1:length(unique_video_pats)
   # Create the start timestamp for this unique recording event by subtracting the duration of the first video in this event from the timestamp of the post-motion video
   start_event <- start_post - tmp$video_1_dur
   # start_event
-
+  
   # Create the end timestamp for this unique recording event by adding the duration of the second video to the start timestamp of the post-motion video
   end_event <- start_post + tmp$video_2_dur
   # end_event
@@ -219,46 +238,137 @@ View(recording_event_ts)
 
 ```
 
-Index the raw RFID movement sensor data by the start and end timestamps of all of the videos used for manual scoring for validation.
+Read in the combined raw data for each sensor type.
 ```{r}
 
-# Read in the raw and combined RFID detections
+# Read in the raw combined infrared beam breaker detections
+irbb_events <- read.csv(file.path(sensor_path, "combined_raw_data_IRBB.csv")) %>% # Make sure that the timestamps are in the right format
+  dplyr::mutate(
+    timestamp_ms = as.POSIXct(format(as.POSIXct(timestamp_ms, tz = ""), "%Y-%m-%d %H:%M:%OS6")))
+
+glimpse(irbb_events)
+
+# Read in the raw combined RFID detections
 rfid_events <- read.csv(file.path(sensor_path, "combined_raw_data_RFID.csv")) %>% # Make sure that the timestamps are in the right format
   dplyr::mutate(
     timestamp_ms = as.POSIXct(format(as.POSIXct(timestamp_ms, tz = ""), "%Y-%m-%d %H:%M:%OS6")))
 
 glimpse(rfid_events)
 
-# Filter the RFID detections to retain only those that occurred within the duration of the given unique recording events TKTK need to add some buffer time before and after, need to be careful about this decision
+# Read in the raw combined video detections
+video_events <- read.csv(file.path(sensor_path, "combined_raw_data_Video.csv")) %>% # Make sure that the timestamps are in the right format
+  dplyr::mutate(
+    timestamp_ms = as.POSIXct(format(as.POSIXct(timestamp_ms, tz = ""), "%Y-%m-%d %H:%M:%OS6")))
 
-# recording_event_ts$start_event[1]
-# [1] "2023-08-07 10:21:21 EDT"
+glimpse(video_events)
 
-# recording_event_ts$end_event[1]
-# [1] "2023-08-07 10:21:34 EDT"
+```
 
-View(rfid_events %>% 
-       dplyr::filter(month == 8 & day == 7))
+Index the raw data per movement sensor type by the start and end timestamps of all of the videos used for manual scoring for validation.
+```{r}
 
-# TKTK need to be inside of a loop
-rfid_events %>% 
-  # glimpse()
-  dplyr::filter(timestamp_ms >= recording_event_ts$start_event - 5 & timestamp_ms <= recording_event_ts$end_event + 5) %>% 
-  dplyr::select(timestamp_ms)
+# Iterate over rows in the video recording event timestamps to pull out raw data from each of the movement sensor types (including the videos themselves), using a buffer of 2 seconds before and after the start and end timestamps of each unique video recording event
+
+# Initialize the movement sensor types (one per raw data spreadsheet)
+sensor_type <- c("IRBB", "RFID", "Video")
+
+# Initialize a list of the raw data objects
+raw_data <- list(
+  irbb_events,
+  rfid_events,
+  video_events
+)
+
+names(raw_data) <- sensor_type
+str(raw_data)
+
+# str(raw_data[["Video"]])
+
+# Initialize the temporal buffer for indexing (seconds)
+buf <- 2
+
+# Testing
+# i <- 1
+# j <- 10
+
+invisible(pblapply(1:length(sensor_type), function(i){
+  
+  res <- data.table::rbindlist(lapply(1:nrow(recording_event_ts), function(j){
+    
+    tmp <- raw_data[[sensor_type[i]]] %>% 
+      dplyr::filter(
+        timestamp_ms >= recording_event_ts$start_event[j] - buf & 
+          timestamp_ms <= recording_event_ts$end_event[j] + buf
+      )
+    
+    return(tmp)
+    
+  }))
+  
+  # The Video has the exact expected number of rows (100) for 50 unique recording events
+  res %>% 
+    write.csv(file.path(indexed_path, paste(paste("combined_raw_data", sensor_type[i], sep = "_"), ".csv", sep = "")), row.names = FALSE)
+  
+}))
+
+```
+
+Looks good. The next step will be to perform automated behavioral scoring of the indexed raw movement sensor data using the default temporal thresholds for automated data processing and behavioral inference from ABISSMAL computational analyses.
+
+Find RFID and beam breaker perching events with indexed movement data....TKTK keep thinking about perching events and change the code below.
+```{r TKTK find perching events}
+
+detect_perching_events(file_nm = "combined_raw_data_RFID.csv", threshold = 2, run_length = 2, sensor_id_col_nm = "sensor_id", timestamps_col_nm = "timestamp_ms", PIT_tag_col_nm = "PIT_tag_ID", rfid_label = "RFID", outer_irbb_label = NULL, inner_irbb_label = NULL, general_metadata_cols = c("chamber_id", "sensor_id"), path = data_path, data_dir = "raw_combined", out_dir = "processed", out_file_prefix = "perching_events", tz = "", POSIXct_format = "%Y-%m-%d %H:%M:%OS")
+
+detect_perching_events(file_nm = "combined_raw_data_IRBB.csv", threshold = 2, run_length = 2, sensor_id_col_nm = "sensor_id", timestamps_col_nm = "timestamp_ms", PIT_tag_col_nm = NULL, rfid_label = NULL, outer_irbb_label = "Outer Beam Breaker", inner_irbb_label = "Inner Beam Breaker", general_metadata_cols = c("chamber_id", "sensor_id"), path = data_path, data_dir = "raw_combined", out_dir = "processed", out_file_prefix = "perching_events", tz = "", POSIXct_format = "%Y-%m-%d %H:%M:%OS")
+
+```
+
+# Pre-processing
+
+Pre-process the RFID, beam breaker, and video data for the indexed detections per sensor.
+```{r preprocess data}
+
+# Used thinning with a threshold of 2 seconds for beam breakers as well
+preprocess_detections(sensor = "IRBB", timestamps_col_nm = "timestamp_ms", group_col_nm = "sensor_id", pixel_col_nm = NULL, mode = "thin", thin_threshold = 2, pixel_threshold = NULL, drop_tag = NULL, path = path, data_dir = "indexed_raw_data", out_dir = "indexed_processed", tz = "", POSIXct_format = "%Y-%m-%d %H:%M:%OS")
+
+# Performed pre-processing with a threshold of 2 seconds for RFID because I removed the timestamp difference rounding
+# The PIT tag IDs specified in `drop_tag` were tags I used for testing the RFID antenna and were not used to mark birds
+preprocess_detections(sensor = "RFID", timestamps_col_nm = "timestamp_ms", group_col_nm = "PIT_tag_ID", pixel_col_nm = NULL, mode = "thin", thin_threshold = 2, pixel_threshold = NULL, drop_tag = c("01-10-3F-84-FC", "01-10-16-B8-7F"), path = path, data_dir = "indexed_raw_data", out_dir = "indexed_processed", tz = "", POSIXct_format = "%Y-%m-%d %H:%M:%OS")
+
+# Used a pixel threshold of 1000 for video data. Since we used 9000 pixels as the sensitivity threshold for motion detection, this filtering threshold will not drop any data
+# This filtering should not drop any videos in the indexed data, and looks good, 100 rows remain
+preprocess_detections(sensor = "Video", timestamps_col_nm = "timestamp_ms", group_col_nm = NULL, pixel_col_nm = "total_pixels_motionTrigger", mode = NULL, thin_threshold = NULL, pixel_threshold = 1000, drop_tag = NULL, path = path, data_dir = "indexed_raw_data", out_dir = "indexed_processed", tz = "", POSIXct_format = "%Y-%m-%d %H:%M:%OS")
+
+```
+
+# Integration
+
+Find clusters of detections across all 3 movement sensor that represent movement events per.
+```{r find detection clusters for 3 sensor types}
+
+# Using camera_label = "Camera" again here since that's was carried through from the raw data
+# The run length needs to be set to 1 in order to correctly detect detection clusters of length 2
+detect_clusters(file_nms = c("pre_processed_data_IRBB.csv", "pre_processed_data_RFID.csv", "pre_processed_data_Video.csv"), threshold = 2, run_length = 1, sensor_id_col_nm = "sensor_id", timestamps_col_nm = "timestamp_ms", PIT_tag_col_nm = "PIT_tag_ID", rfid_label = "RFID", camera_label = "Camera", preproc_metadata_col_nms = c("thin_threshold_s", "pixel_threshold", "data_stage", "date_pre_processed"), general_metadata_col_nms = c("chamber_id", "year", "month", "day"), video_metadata_col_nms = c("total_pixels_motionTrigger", "video_file_name"), path = path, data_dir = "indexed_processed", out_dir = "indexed_processed", out_file_nm = "detection_clusters.csv", tz = "", POSIXct_format = "%Y-%m-%d %H:%M:%OS")
+  
+```
+
+Score detection clusters to make inferences about behavioral events associated with these movements. TKTK need to later integrate perching events (perching_dataset = "RFID-IRBB", perching_prefix = "perching_events_"), also sensor_id_col_nm, PIT_tag_col_nm cannot be NULL
+```{r score detection clusters for 3 sensor types}
+
+score_clusters(file_nm = "detection_clusters.csv", rfid_label = "RFID", camera_label = "Camera", outer_irbb_label = "Outer Beam Breaker", inner_irbb_label = "Inner Beam Breaker", video_metadata_col_nms = c("total_pixels_motionTrigger", "video_file_name"), integrate_perching = FALSE, sensor_id_col_nm = NULL, PIT_tag_col_nm = NULL, pixel_col_nm = "total_pixels_motionTrigger", video_width = 1280, video_height = 720, integrate_preproc_video = TRUE, video_file_nm = "pre_processed_data_Video.csv", timestamps_col_nm = "timestamp_ms", path = path, data_dir = "indexed_processed", out_dir = "indexed_processed", out_file_nm = "scored_detectionClusters.csv", tz = "", POSIXct_format = "%Y-%m-%d %H:%M:%OS")
 
 ```
 
 
-
-
-- Perform automated behavioral scoring of the indexed raw movement sensor data, and iterate over a range of temporal thresholds used for clustering detections across sensors (for pre-processing, use the same parameters as in the methods manuscript)
-
-- Check that the automated and manual datasets are in similar format
+Next, we need to Check that the automated and manual datasets are in similar format in order to make a 1:1 plot for the very first validation figure.
 
 ii) Analyzing overall patterns of activity:
 
 - Do both scoring methods return similar levels of activity for each unique recording event?
 - Plot the levels of activity for each recording event by each method against each other, and repeat this process for different temporal thresholds used for the automated scoring
+
+ - consider iterating over a range of temporal thresholds used for clustering detections across sensors
 
 iii) Analyzing overall patterns of activity by behavioral state:
 
