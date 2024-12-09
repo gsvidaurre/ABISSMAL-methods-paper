@@ -350,7 +350,7 @@ Find clusters of detections across all 3 movement sensor that represent movement
 # Using camera_label = "Camera" again here since that's was carried through from the raw data
 # The run length needs to be set to 1 in order to correctly detect detection clusters of length 2
 detect_clusters(file_nms = c("pre_processed_data_IRBB.csv", "pre_processed_data_RFID.csv", "pre_processed_data_Video.csv"), threshold = 2, run_length = 1, sensor_id_col_nm = "sensor_id", timestamps_col_nm = "timestamp_ms", PIT_tag_col_nm = "PIT_tag_ID", rfid_label = "RFID", camera_label = "Camera", preproc_metadata_col_nms = c("thin_threshold_s", "pixel_threshold", "data_stage", "date_pre_processed"), general_metadata_col_nms = c("chamber_id", "year", "month", "day"), video_metadata_col_nms = c("total_pixels_motionTrigger", "video_file_name"), path = path, data_dir = "indexed_processed", out_dir = "indexed_processed", out_file_nm = "detection_clusters.csv", tz = "", POSIXct_format = "%Y-%m-%d %H:%M:%OS")
-  
+
 ```
 
 Score detection clusters to make inferences about behavioral events associated with these movements. TKTK need to later integrate perching events (perching_dataset = "RFID-IRBB", perching_prefix = "perching_events_"), also sensor_id_col_nm, PIT_tag_col_nm cannot be NULL
@@ -361,13 +361,103 @@ score_clusters(file_nm = "detection_clusters.csv", rfid_label = "RFID", camera_l
 ```
 
 Next, we need to check that the automated and manual datasets are in similar format in order to make a 1:1 plot for the very first validation figure.
+```{r}
+
+auto_scoring <- read.csv(file.path(path, "indexed_processed", "scored_detectionClusters.csv"))
+
+# Check out the automated inferences and the manualn scoring results (filtered by the subsample of videos used to develop this code, and unmasked)
+glimpse(auto_scoring)
+glimpse(manual_scoring_nm)
+
+View(auto_scoring)
+View(manual_scoring_nm)
+
+# These columns contain the name of the video file associated with each event that was scored. The automated inferences will have NAs in this column when a video recording event was not associated with the given event
+auto_scoring$video_file_name
+manual_scoring_nm$unmasked_video_file
+
+# The manual scoring protocol was oriented to score several behavioral states (and per subject) across each video recording event, while the automated scoring can identify multiple behavioral events associated with each video recording event, but is less likely to identify as many as the manual scoring given that we have more limited individual resolution (RFID at the container entrance only, and this can fail to detect PIT tags). In the automated inferences, are there cases when a single video recording event was used for more than one behavioral score?
+
+# Yes, although in this subsample of the data there is only 1 video recording event that meets this condition
+length(auto_scoring$video_file_name[!is.na(auto_scoring$video_file_name)])
+length(unique(auto_scoring$video_file_name[!is.na(auto_scoring$video_file_name)]))
+which(duplicated(auto_scoring$video_file_name[!is.na(auto_scoring$video_file_name)]))
+auto_scoring$video_file_name[!is.na(auto_scoring$video_file_name)][17]
+
+auto_scoring %>% 
+  dplyr::filter(video_file_name == "Box_03_2023_7_22_13_24_42_pre_trigger.mp4") %>% 
+  View()
+
+# Then we need to summarize the automated and manually scored data to yield a single row per video recording event, in order to make a 1:1 plot. In this plot, there should be more behavioral states scored manually than using the automated inferences (see my rationale above)
+auto_scoring_summ <- auto_scoring %>%
+  # Drop rows that did not have an associated video recording event
+  dplyr::filter(!is.na(video_file_name)) %>% 
+  group_by(video_file_name) %>% 
+  dplyr::summarise(
+    n_events = n()
+  )
+
+manual_scoring_nm_summ <- manual_scoring_nm %>% 
+  group_by(unmasked_video_file) %>% 
+  dplyr::summarise(
+    n_events = n()
+  )
+
+glimpse(auto_scoring_summ)
+glimpse(manual_scoring_nm_summ)
+
+# Merge this data together and make a plot
+gg_res <- auto_scoring_summ %>% 
+  dplyr::mutate(
+    type = "automated_inference"
+  ) %>% 
+  bind_rows(
+    manual_scoring_nm_summ %>%
+      dplyr::rename(
+        `video_file_name` = "unmasked_video_file"
+      ) %>% 
+      dplyr::mutate(
+        type = "manual_scoring"
+      )
+  )
+
+# This result makes sense given the coarser-grained temporal resolution of the automated scoring 
+gg_res %>% 
+  pivot_wider(id_cols = video_file_name, names_from = type, values_from = "n_events") %>%
+  dplyr::arrange(automated_inference, manual_scoring) %>% 
+  ggplot(aes(x = manual_scoring, y = automated_inference)) +
+  geom_point() +
+  geom_jitter(width = 0.25, height = 0.25) +
+  geom_abline(slope = 1, linetype = "dotted") +
+  scale_y_continuous(limits = c(0, max(gg_res$n_events)), breaks = seq(0, max(gg_res$n_events), 1)) +
+  scale_x_continuous(limits = c(0, max(gg_res$n_events)), breaks = seq(0, max(gg_res$n_events), 1)) +
+  xlab("Behavioral events obtained by manual scoring") +
+  ylab("Behavioral events obtained by automated inference") +
+  theme_bw() +
+  theme(
+    panel.grid.minor = element_blank()
+  )
+  
+  
+```
+
+Next steps:
+
+- Assign the automated inferences currently not associated with a video recording event to a video recording event using the time buffer we used to index the raw data. While manually scoring videos, Summer could sometimes see birds outside of the container from the video itself
+
+- Redo the 1:1 plot with the updated dataset
+
+- Consider asking validation questions to account for the coarser-grained temporal resolution of the automated scoring. For instance, when considering the sequence of behavioral events across the time unit represented by each video, how well do the automated inferences and the manual scoring agree on the behavioral label of the first event? For these same time units, what is the "dominant" behavioral score based on duration, and do the methods agree on this as well? How well do the timestamps agree for the first behavioral label per time unit?
+
+Alternatives to consider: I may be thinking about this wrong, and it may make more sense to process/make inferences for the full dataset from all movement sensors, and then index the behavioral inferences to focus on the subsample of videos that was scored. Alternatively, we could concatenate the manual scores per video recording event, and ask if the automated scoring catches at least one of those manual labels per recording event
+
 
 ii) Analyzing overall patterns of activity:
 
 - Do both scoring methods return similar levels of activity for each unique recording event?
 - Plot the levels of activity for each recording event by each method against each other, and repeat this process for different temporal thresholds used for the automated scoring
 
- - consider iterating over a range of temporal thresholds used for clustering detections across sensors
+- consider iterating over a range of temporal thresholds used for clustering detections across sensors
 
 iii) Analyzing overall patterns of activity by behavioral state:
 
