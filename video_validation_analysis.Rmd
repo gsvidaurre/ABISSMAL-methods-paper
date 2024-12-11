@@ -583,31 +583,19 @@ View(manual_auto_integr)
 
 ```
 
-- Perform the same comparison as above, but ask how reliably we captured individual identity with RFID
+Work on the following updates:
 
-- How well do the timestamps agree for the first behavioral label per time unit?
+- Start validation analyses at a very coarse-grained scale with the manual scoring as a baseline:
 
-- For these same time units, what is the "dominant" behavioral score based on duration, and do the methods agree on this as well?
+ 0. Automated data processing: Iterate over parameters that we use for the automated scoring, especially the temporal thresholds used for clustering, to create different automated scoring datasets for the analyses below
 
-- Is it possible to make inferences about the duration of time spent inside or outside the nest container?
-
-Alternatives to consider: I may be thinking about this wrong, and it may make more sense to process/make inferences for the full dataset from all movement sensors, and then index the behavioral inferences to focus on the subsample of videos that was scored. Alternatively, we could concatenate the manual scores per video recording event, and ask if the automated scoring catches at least one of those manual labels per recording event
-
-
-ii) Analyzing overall patterns of activity:
-
-- Do both scoring methods return similar levels of activity for each unique recording event?
-- Plot the levels of activity for each recording event by each method against each other, and repeat this process for different temporal thresholds used for the automated scoring
-
-- consider iterating over a range of temporal thresholds used for clustering detections across sensors
-
-iii) Analyzing overall patterns of activity by behavioral state:
-
-- Do both scoring methods return similar levels of activity for behavioral state across each unique recording event?
-
-iv) How do the timestamps of scored behavioral states compare between methods?
-
-*** As the best methods comparison: how badly are our statistical/biological inferences skewed using one method or the other? Iterate over parameters that we use for the automated scoring, especially the temporal thresholds used for clustering
+  1. First, how well does the integration of 3 movement sensors capture whether birds are inside of the container or not? Can we generally use the automated scores to infer that sensor activity was due to the birds or not? For this analysis, perform integration of data from the 3 sensors for all days of data collection, and then index the scored activities using the timestamps of the manually scored video recording events with a time buffer around them. Focus on asking whether the automated and manual scores capture activity by a bird at the container entrance or inside of the container, and how often the automated scoring is capturing activity that cannot be attributed to a bird. Is it possible to use periods of time with no sensor activity to infer that no bird was present inside of the container?
+  
+  2. Second, ask how well the integrated dataset of movement sensors agrees with the first behavioral score attributed to each video recording event by manual scoring. This is a finer-grained validation to ask if behavioral categories associated with the video recording events match between the two methods. Check out my notes above that detail expectations - there will be more scores per video recording event using the manual method
+  
+  3. Third, use the videos selected for entire days of data collection for another fine-grained validation analysis to ask how well the automated integration of sensors picks up long sequences of behavioral events throughout the day, compared to the manually scored videos. Here the caveat will be that we do not have continuous video recordings, so there will likely be more activity scored across each day by the automated methods. Instead, focus on asking how well the two methods concide in identifying sequential behaviors across the ethogram used for validation (perching, enter, exit, inside container)
+  
+  4. Ask how reliably we captured individual identity with RFID compared to the manually scored videos, and how often no PIT tags or only a single PIT was detected when manual video scoring detected 1 tagged adult or 2 inside of the nest container
 
 
-5. Run the full validation analysis pipeline with all 4045 video recording events
+Once the pipeline above is developed, then run the full validation analysis pipeline with all 4045 video recording events
