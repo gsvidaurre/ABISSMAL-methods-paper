@@ -234,7 +234,7 @@ recording_event_ts <- data.table::rbindlist(pblapply(1:length(unique_video_pats)
 
 # We can use the timestamps to index the raw detections for all other movement sensors for validation
 glimpse(recording_event_ts)
-View(recording_event_ts)
+# View(recording_event_ts)
 
 ```
 
@@ -363,14 +363,19 @@ score_clusters(file_nm = "detection_clusters.csv", rfid_label = "RFID", camera_l
 Next, we need to check that the automated and manual datasets are in similar format in order to make a 1:1 plot for the very first validation figure.
 ```{r}
 
-auto_scoring <- read.csv(file.path(path, "indexed_processed", "scored_detectionClusters.csv"))
+auto_scoring <- read.csv(file.path(path, "indexed_processed", "scored_detectionClusters.csv")) %>% 
+  # Make sure that the timestamps are in the right format
+  dplyr::mutate(
+    start = as.POSIXct(format(as.POSIXct(start, tz = ""), "%Y-%m-%d %H:%M:%OS6")),
+    end = as.POSIXct(format(as.POSIXct(end, tz = ""), "%Y-%m-%d %H:%M:%OS6"))
+  )
 
-# Check out the automated inferences and the manualn scoring results (filtered by the subsample of videos used to develop this code, and unmasked)
+# Check out the automated inferences and the manual scoring results (filtered by the subsample of videos used to develop this code, and unmasked)
 glimpse(auto_scoring)
 glimpse(manual_scoring_nm)
 
-View(auto_scoring)
-View(manual_scoring_nm)
+# View(auto_scoring)
+# View(manual_scoring_nm)
 
 # These columns contain the name of the video file associated with each event that was scored. The automated inferences will have NAs in this column when a video recording event was not associated with the given event
 auto_scoring$video_file_name
@@ -388,8 +393,80 @@ auto_scoring %>%
   dplyr::filter(video_file_name == "Box_03_2023_7_22_13_24_42_pre_trigger.mp4") %>% 
   View()
 
+# How many automated scores have no associated video?
+# Two rows
+auto_scoring %>% 
+  dplyr::filter(is.na(video_file_name)) %>% 
+  nrow()
+
+
+# Iterate over rows in the automated scores, and for scored events not associated with videos, figure out whether those timestamps align with the start and end of a unique recording event with the added time buffer on either end
+auto_scoring_extraAssignedVids <- data.table::rbindlist(lapply(1:nrow(auto_scoring), function(i){
+  
+  cat(paste("i = ", i, "\n", sep = " "))
+  
+  tmp_auto <- auto_scoring %>% 
+    slice(i)
+  
+  if(is.na(tmp_auto$video_file_name)){
+    
+    # This filter will only find matches when the non-video sensor event started before the video recording
+    tmp <- recording_event_ts %>% 
+      # Filter using the start time, and bound the end timestamp to fall within 18 seconds after the start (to account for recording events composed of a video of ~6 seconds, then a video of ~ 10 seconds, sometimes up to 18 seconds together)
+      dplyr::filter(
+        start_event >= tmp_auto$start & end_event <= (tmp_auto$start + 18)
+      )
+    
+    # Perform a search for events that occurred in the middle of a video recording if the search above didn't return results
+    if(nrow(tmp) == 0){
+      
+      tmp <- recording_event_ts %>%
+        # This filter will only find matches when the non-video sensor event started after the video recording
+        dplyr::filter(
+          tmp_auto$start >= start_event & tmp_auto$start <= end_event
+        )
+      
+    }
+    
+    if(nrow(tmp) > 0){
+      
+      # Return the current row with the video recording event assigned as above
+      res <- tmp_auto %>% 
+        dplyr::mutate(
+          assigned_recording_event = tmp$unique_recording_event_ID
+        )
+      
+    } else {
+      
+      # Return the current row with the video recording event assigned as missing
+      res <- tmp_auto %>% 
+        dplyr::mutate(
+          assigned_recording_event = NA
+        )
+      
+    }
+    
+  } else {
+    
+    res <- tmp_auto %>% 
+      dplyr::mutate(
+        assigned_recording_event = video_file_name
+      )
+    
+  }
+  
+  return(res)
+  
+}))
+
+
+glimpse(auto_scoring_extraAssignedVids)
+
+# All values that are missing the suffix "pre-trigger" or "post-trigger" were assigned in the loop above
+unique(auto_scoring_extraAssignedVids$assigned_recording_event)
+
 # Then we need to summarize the automated and manually scored data to yield a single row per video recording event, in order to make a 1:1 plot. In this plot, there should be more behavioral states scored manually than using the automated inferences (see my rationale above)
-auto_scoring_summ <- auto_scoring %>%
+auto_scoring_summ <- auto_scoring_extraAssignedVids %>%
   # Drop rows that did not have an associated video recording event
   dplyr::filter(!is.na(video_file_name)) %>% 
   group_by(video_file_name) %>% 
@@ -437,17 +514,82 @@ gg_res %>%
   theme(
     panel.grid.minor = element_blank()
   )
-  
-  
+
+
 ```
 
 Next steps:
 
-- Assign the automated inferences currently not associated with a video recording event to a video recording event using the time buffer we used to index the raw data. While manually scoring videos, Summer could sometimes see birds outside of the container from the video itself
 
-- Redo the 1:1 plot with the updated dataset
+- Consider asking validation questions to account for the coarser-grained temporal resolution of the automated scoring. For instance, when considering the sequence of behavioral events across the time unit represented by each video, how well do the automated inferences and the manual scoring agree on the behavioral label of the first event? Here we should ignore subject
+```{r}
 
-- Consider asking validation questions to account for the coarser-grained temporal resolution of the automated scoring. For instance, when considering the sequence of behavioral events across the time unit represented by each video, how well do the automated inferences and the manual scoring agree on the behavioral label of the first event? For these same time units, what is the "dominant" behavioral score based on duration, and do the methods agree on this as well? How well do the timestamps agree for the first behavioral label per time unit?
+# Here we need to pull information from direction scored, inferredMovement_Location, and add in the perching events (see above) to match the majority of the manual scoring labels (aside from No Birds)
+glimpse(auto_scoring_extraAssignedVids)
+
+glimpse(manual_scoring_nm)
+unique(manual_scoring_nm$Behavior)
+
+# Focus on inside the container, entrances, and exits for now
+# First, get the first behavioral label for each of the unique videos in the manually scored data
+# The tricky thing here will be cases in which there are two behavioral states with the same start timestamp but for different subjects. In this case, we should focus on asking whether the automated score is at least contained within the first manual scores
+tmp_manual <- manual_scoring_nm %>% 
+  dplyr::select(Behavior, Start..s., Stop..s., unmasked_video_file) %>% 
+  group_by(unmasked_video_file) %>% 
+  arrange(Start..s.) %>% 
+  # Filter to retain behavioral states per subject that started at the very start of each video
+  dplyr::filter(
+    Start..s. == 0
+  ) %>% 
+  ungroup()
+
+# Then for each of these rows in the manually scored data, get the first automated score for the corresponding video
+
+# i <- 1
+manual_auto_integr <- data.table::rbindlist(lapply(1:nrow(tmp_manual), function(i){
+  
+  tmp <- auto_scoring_extraAssignedVids %>% 
+    dplyr::filter(
+      grepl(tmp_manual$unmasked_video_file[i], assigned_recording_event)
+    ) %>%
+    arrange(start) %>% 
+    slice(1) %>% 
+    dplyr::select(direction_scored, inferredMovement_Location)
+  
+  # The inferred movement location column holds the score "inside container" or INSC in the manually scored data when an exit or entrance wasn't detected
+  if(is.na(tmp$direction_scored)){
+    
+    inference <- tmp$inferredMovement_Location
+  
+  } else {
+    
+    inference <- tmp$direction_scored
+  }
+  
+  return(
+    
+    tmp_manual %>% 
+      slice(i) %>% 
+      dplyr::mutate(
+        first_auto_inference = inference
+      )
+  )
+  
+}))
+
+# TKTK continue
+View(manual_auto_integr)
+
+
+```
+
+- Perform the same comparison as above, but ask how reliably we captured individual identity with RFID
+
+- How well do the timestamps agree for the first behavioral label per time unit?
+
+- For these same time units, what is the "dominant" behavioral score based on duration, and do the methods agree on this as well?
+
+- Is it possible to make inferences about the duration of time spent inside or outside the nest container?
 
 Alternatives to consider: I may be thinking about this wrong, and it may make more sense to process/make inferences for the full dataset from all movement sensors, and then index the behavioral inferences to focus on the subsample of videos that was scored. Alternatively, we could concatenate the manual scores per video recording event, and ask if the automated scoring catches at least one of those manual labels per recording event
 
