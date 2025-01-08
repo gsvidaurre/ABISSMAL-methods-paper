@@ -11,6 +11,8 @@ The manually scored data needs to be concatenated and checked prior to running t
 
 Finally, the validation analysis will be planned out and run with a random subsample of the videos used for this analysis.
 
+TKTK check true and false negative calculations throughout.
+
 ```{r}
 
 knitr::opts_knit$set(eval = TRUE, echo = TRUE)
@@ -349,7 +351,7 @@ detect_clusters(file_nms = c("pre_processed_data_IRBB.csv", "pre_processed_data_
 
 ```
 
-Score detection clusters to make inferences about behavioral events associated with these movements.
+Score detection clusters to make inferences about behavioral events associated with these movements.  `score_clusters` should be making inferences by just the first edge encountered, not all edges in a sequence, because the system is currently targeted to capturing overall patterns of activity.
 ```{r score detection clusters for 3 sensor types}
 
 score_clusters(file_nm = "detection_clusters.csv", rfid_label = "RFID", camera_label = "Camera", outer_irbb_label = "Outer Beam Breaker", inner_irbb_label = "Inner Beam Breaker", video_metadata_col_nms = c("total_pixels_motionTrigger", "video_file_name"), integrate_perching = TRUE, perching_dataset = "RFID-IRBB", perching_prefix = "perching_events_", sensor_id_col_nm = "sensor_id", PIT_tag_col_nm = "PIT_tag_ID", pixel_col_nm = "total_pixels_motionTrigger", video_width = 1280, video_height = 720, integrate_preproc_video = TRUE, video_file_nm = "pre_processed_data_Video.csv", timestamps_col_nm = "timestamp_ms", path = path, data_dir = "processed", out_dir = "processed", out_file_nm = "scored_detectionClusters.csv", tz = "", POSIXct_format = "%Y-%m-%d %H:%M:%OS")
@@ -652,8 +654,6 @@ auto_table <- auto_scoring2 %>%
   t()
 
 # View(auto_scoring2)
-
-# TKTK need to doublecheck: `score_clusters` should be making inferences by just the first edge encountered, not all edges in a sequence, because the system is currently targeted to capturing overall patterns of activity
 
 View(auto_table)
 View(manual_table)
@@ -1503,11 +1503,391 @@ data.frame(
 
 ```
 
-TKTK continue
+6. BEHAVIORAL INFERENCE: Next, ask how well the integrated dataset of movement sensors scored the TYPE of activity detected. This is a finer-grained validation to ask how well behavioral scores associated with the video recording events match between the two methods. Check out my notes above that detail expectations - there will be more scores per video recording event using the manual method. The ABISSMAL functions also are currently designed to identify discrete behavioral events in a coarse-grained way, rather than longer sequences of these dicrete events. Therefore, the analyses below focus on asking how often each type of behavior was identified per unique video recording event per method, rather than comparing sequences of behavioral scores.
 
-6. BEHAVIORAL INFERENCE: Next, ask how well the integrated dataset of movement sensors scored the TYPE of activity detected. This is a finer-grained validation to ask if behavioral categories associated with the video recording events match between the two methods. Check out my notes above that detail expectations - there will be more scores per video recording event using the manual method.
+For the analysis below, we want to know how often ABISSMAL and manual scoring picked up the same behavior in association with a given video recording event. Here we will compare the 4 categories of coarse-grained behaviors identified by both methods: INSC, PERC, ENTR, EXIT. We will also focus on scoring of only a single behavior at a time here.
 
-7. Automated data processing: Iterate over parameters that we use for the automated scoring, especially the temporal thresholds used for clustering, to create different automated scoring datasets for the analyses below
+**True positive** = the same behavior was detected by both ABISSMAL and manual scoring.
 
+**False negative** = ABISSMAL did not detect the same behavior that was detected by the manual scoring. We cannot detect a true lack of detections by ABISSMAL (e.g. no behavioral score at all), since this validation analysis relies on the same videos recorded by motion detection to compare scoring methods, and all of these video recordings are associated with an automated behavioral inference by default.
+
+**False positive** = ABISSMAL detected a different behavior from the manual scoring, or the manual scoring did not detect any birds (NOBR).
+
+**True negative** = neither ABISSMAL nor manual scoring detect the given behavior. We cannot calculate true negatives (e.g. no behavioral scores at all) for the same reasons as above with false negatives.
+
+Overall, we can calculate the precision, sensitivity, and specificity of detecting types of behaviors. Note that the false negatives and false positives are not mutually exclusive, although here the false positive calculations will take the NOBR manual scoring into account (so the false positives and negatives will not be exactly the same).
+```{r}
+
+# First we need to condense the behavioral inferences from automated scoring into a single column, again
+auto_scoring5 <- auto_scoring_extraAssignedVids %>%
+  dplyr::mutate(
+    perching_inference = ifelse(!is.na(perching_rfid_start) | !is.na(perching_outer_irbb_start) | !is.na(perching_inner_irbb_start), "perching", NA)) %>% 
+  dplyr::mutate(
+    inferences = paste(direction_scored, inferredMovement_Location, perching_inference, sep = "-")
+  )
+
+glimpse(auto_scoring5)
+View(auto_scoring5)
+
+table(auto_scoring5$inferences)
+
+# no perching events represented here with this video subsample:
+
+# entrance-container_entrance-NA      ### this is an entrance or ENTR
+#                              6 
+# exit-container_entrance-NA          ### this is an exit or EXIT
+#                              3 
+# NA-inside_container-NA              ### this is inside_container or INSC
+#                             44 
+
+# Will need to add back perching events for the full dataset (currently that inference is NA here)
+auto_scoring5 <- auto_scoring5 %>% 
+  dplyr::mutate(
+    comb_behav_inf = ifelse(grepl("^entrance-|-entrance", inferences), "ENTR", inferences),
+    comb_behav_inf = ifelse(grepl("^exit-|-exit", comb_behav_inf), "EXIT", comb_behav_inf),
+    comb_behav_inf = ifelse(grepl("inside_container", comb_behav_inf), "INSC", comb_behav_inf),
+    comb_behav_inf = ifelse(grepl("perch", comb_behav_inf), "PERC", comb_behav_inf)
+  )
+
+# Looks good
+table(auto_scoring5$inferences)
+table(auto_scoring5$comb_behav_inf)
+glimpse(auto_scoring2)
+
+```
+
+Then we need to condense the automated scoring and the manual scoring data frame to have a single row per video.
+```{r}
+
+# View(manual_scoring_nm)
+names(manual_scoring_nm)
+
+# Get one row of behavioral labels per video recording event
+manual_table <- manual_scoring_nm %>% 
+  group_by(unmasked_video_file) %>%
+  # Create a unique row identifier within videos
+  dplyr::mutate(
+    row_id = row_number()
+  ) %>% 
+  ungroup() %>% 
+  # View()
+  dplyr::select(row_id, unmasked_video_file, Behavior) %>% 
+  pivot_wider(names_from = unmasked_video_file, values_from = Behavior) %>% 
+  t()
+
+auto_table <- auto_scoring5 %>% 
+  group_by(assigned_recording_event) %>%
+  # Create a unique row identifier within videos
+  dplyr::mutate(
+    row_id = row_number()
+  ) %>% 
+  ungroup() %>% 
+  # View()
+  dplyr::select(row_id, assigned_recording_event, comb_behav_inf) %>% 
+  pivot_wider(names_from = assigned_recording_event, values_from = comb_behav_inf) %>% 
+  t()
+
+# View(auto_scoring2)
+
+View(auto_table)
+View(manual_table)
+
+```
+
+Calculate the true and false positives, and the true and false negatives.
+```{r}
+
+# Looks good
+length(unique(auto_scoring5$assigned_recording_event))
+length(unique(manual_scoring_nm$unmasked_video_file))
+
+# Iterate over all the unique videos included in the automated and manual scoring tables
+unique_videos <- unique(manual_scoring_nm$unmasked_video_file)
+unique_videos
+
+glimpse(auto_table)
+glimpse(manual_table)
+
+behavior_labels <- c("PERC", "ENTR", "EXIT", "INSC")
+no_behavior_label <- "NOBR"
+
+# i <- 2
+# n <- 2
+
+tp_fp_tn_fn <- data.table::rbindlist(pblapply(1:length(unique_videos), function(i){
+  
+  # Get unique behavioral scores for the given unique recording event from summarized tables of both scoring methods
+  auto_scores <- unique(auto_table[grep(unique_videos[i], dimnames(auto_table)[[1]]), ])
+  auto_scores <- auto_scores[!is.na(auto_scores)]
+  
+  manual_scores <- unique(manual_table[grep(unique_videos[i], dimnames(manual_table)[[1]]), ])
+  manual_scores <- manual_scores[!is.na(manual_scores)]
+  
+  # auto_scores
+  manual_scores
+  
+  # Iterate over the activity labels
+  tmp_res <- data.table::rbindlist(lapply(1:length(behavior_labels), function(n){
+    
+    # Convert scores to Boolean using the activity labels
+    auto_a <- ifelse(any(behavior_labels[n] %in% auto_scores), TRUE, FALSE)
+    manual_a <- ifelse(any(behavior_labels[n] %in% manual_scores), TRUE, FALSE)
+    
+    # Convert scores to Boolean using the no activity label
+    auto_n <- ifelse(any(no_behavior_label %in% auto_scores), TRUE, FALSE)
+    manual_n <- ifelse(any(no_behavior_label %in% manual_scores), TRUE, FALSE)
+    
+    # auto_a
+    # manual_a
+    # auto_n
+    # manual_n
+    
+    # Score true positives: both methods identitfied a type of activity
+    if(auto_a & manual_a){
+      
+      true_positive <- 1
+      
+    } else {
+      
+      true_positive <- 0
+      
+    }
+    
+    # Score false positives: manual scoring identified NOBR or the given type of behavior but ABISSMAL detected a different behavior
+    if((!manual_a & auto_a) | (manual_n & !auto_n)){
+      
+      false_positive <- 1
+      
+    } else {
+      
+      false_positive <- 0
+      
+    }
+    
+    # Score true negatives: both methods identitfied a different type of activity
+    if(auto_n & manual_n){
+      
+      true_negative <- 1
+      
+    } else {
+      
+      true_negative <- 0
+      
+    }
+    
+    # Score false negatives: ABISSMAL detected the given behavior but manual scoring identified a different behavior
+    if(manual_a & !auto_a){
+      
+      false_negative <- 1
+      
+    } else {
+      
+      false_negative <- 0
+      
+    }
+    
+    return(
+      data.frame(
+        unique_video_recording_event = unique_videos[i],
+        behavior_label = behavior_labels[n],
+        true_positive = true_positive,
+        false_positive = false_positive,
+        true_negative = true_negative,
+        false_negative = false_negative
+      )
+    )
+    
+    
+  }))
+  
+}))
+
+# There should be 4 rows for each of the unique video recording events, looks good
+glimpse(tp_fp_tn_fn)
+length(unique_videos) * length(behavior_labels) == nrow(tp_fp_tn_fn)
+
+```
+
+Calculate precision, recall, sensitivity, and specificity of activity detection by behavioral activity.
+```{r}
+
+tp_fp_tn_fn_sum <- tp_fp_tn_fn %>% 
+  group_by(behavior_label) %>% 
+  dplyr::summarise(
+    tps = sum(true_positive),
+    fps = sum(false_positive),
+    tns = sum(true_negative),
+    fns = sum(false_negative)
+  ) %>% 
+  ungroup()
+
+tp_fp_tn_fn_sum
+
+# Precision across behaviors
+precision_ind <- sapply(1:length(behavior_labels), function(i){
+  
+  precision(X = tp_fp_tn_fn_sum[grep(behavior_labels[i], tp_fp_tn_fn_sum$behavior_label), ], tps_col_nm = "tps", fps_col_nm = "fps")
+  
+})
+
+precision_ind
+
+# Sensitivity across behaviors
+sensitivity_ind <- sapply(1:length(behavior_labels), function(i){
+  
+  sensitivity(X = tp_fp_tn_fn_sum[grep(behavior_labels[i], tp_fp_tn_fn_sum$behavior_label), ], tps_col_nm = "tps", fns_col_nm = "fns")
+  
+})
+
+sensitivity_ind
+
+# Specificity across behaviors
+specificity_ind <- sapply(1:length(behavior_labels), function(i){
+  
+  specificity(X = tp_fp_tn_fn_sum[grep(behavior_labels[i], tp_fp_tn_fn_sum$behavior_label), ], tns_col_nm = "tps", fps_col_nm = "fns")
+  
+})
+
+specificity_ind
+
+# Note that sensitivity and specificity are not exactly the same here, given the way that false positives and negatives were defined
+
+data.frame(
+  behavior_label = behavior_labels,
+  precision = precision_ind,
+  sensitivity = sensitivity_ind,
+  specificity = specificity_ind
+)
+
+```
+
+8. TIMING AND DURATION OF BEHAVIORS.
+
+For each behavioral event scored between methods, how well do the timestamps align? This analysis will depend on finding an "optimal" set of data processing and integration parameters for the automated scoring using the comparisons above to the manually scored baseline.  Alternatively, the analysis could be done in a way that facilitates comparisons across these parameters, but this could get messy.
+
+What I want to know is: when a given behavioral event was identified by both methods, when did this event begin and end, and how do these timestamps compare between methods?
+
+TKTK consider updating `score_clusters` to assign the end timestamp of INSC events as the end of the video recording event. Currently the end timestamp is the same as the start, and we need the true video recording event duration to do this (which is currently hard to access but in this analysis can be pulled from BORIS). This needs to be done in a later version of the ABISSMAL functions.
+```{r}
+
+# Iterate over all the unique videos included in the automated and manual scoring tables
+unique_videos <- unique(manual_scoring_nm$unmasked_video_file)
+unique_videos
+
+glimpse(auto_table)
+glimpse(manual_table)
+
+behavior_labels <- c("PERC", "ENTR", "EXIT", "INSC")
+
+# i <- 2
+# n <- 4
+
+temporal_validtn <- data.table::rbindlist(pblapply(1:length(unique_videos), function(i){
+  
+  # Get unique behavioral scores for the given unique recording event from summarized tables of both scoring methods
+  auto_scores <- unique(auto_table[grep(unique_videos[i], dimnames(auto_table)[[1]]), ])
+  auto_scores <- auto_scores[!is.na(auto_scores)]
+  
+  manual_scores <- unique(manual_table[grep(unique_videos[i], dimnames(manual_table)[[1]]), ])
+  manual_scores <- manual_scores[!is.na(manual_scores)]
+  
+  # auto_scores
+  # manual_scores
+  
+  # Iterate over the activity labels to determine whether the same behavior was scored by both methods within this video recording event time slot
+  tmp_res <- data.table::rbindlist(lapply(1:length(behavior_labels), function(n){
+    
+    # Convert scores to Boolean using the activity labels
+    auto_a <- ifelse(any(behavior_labels[n] %in% auto_scores), TRUE, FALSE)
+    manual_a <- ifelse(any(behavior_labels[n] %in% manual_scores), TRUE, FALSE)
+    
+    # If the given behavior was scored by both methods, then find the start and the end timestamps of the behavioral state identified by both methods
+    if(auto_a & manual_a){
+      
+      # Account for multiple behavioral events of the given type in each dataset for the given video, this may be possible (especially for the manually scored dataset). Currently, this analysis will only compare the very first exemplar of the given behavior when multiple are present for the given video recording event (for instance, when two subjects were scored as being inside of the container for the entire duration of the video recording event)
+      
+      # Search for temporal coordinates in the automatically scored dataset
+      tmp_auto <- auto_scoring5 %>% 
+        # First search for the unique recording event in this iteration
+        dplyr::filter(grepl(unique_videos[i], assigned_recording_event)) %>% 
+        # Then search for the behavioral label that matches the current iteration
+        dplyr::filter(comb_behav_inf == behavior_labels[n]) %>% 
+        slice(1)
+      
+      # Search for temporal coordinates in the manually scored dataset
+      tmp_manual <- manual_scoring_nm %>% 
+        # First search for the unique recording event in this iteration
+        dplyr::filter(grepl(unique_videos[i], unmasked_video_file)) %>% 
+        # Then search for the behavioral label that matches the current iteration
+        dplyr::filter(Behavior == behavior_labels[n]) %>% 
+        slice(1)
+      
+       # If the current behavior was INSC, then update the end timestamp automatically assigned by ABISSMAL to instead be the end of the unique recording event
+      # Pull the duration of the given recording event from the manually scored dataset (BORIS returns this information automatically)
+      if(behavior_labels[n] == "INSC"){
+        
+        # Get the complete recording event duration in seconds
+        recording_event_dur <- sum(as.numeric(strsplit(tmp_manual$Media.duration..s., split = ";")[[1]]))
+        
+        # Add the recording event duration to the automated start timestamp
+        tmp_auto$end <- tmp_auto$start + recording_event_dur
+        
+      }
+      
+      # Get a POSIX format timestamp for the manually scored videos using the video recording file name (which indicates the timestamp at which video recording started)
+      timestamp <- gsub("Box_03_|pre-trigger.mp4|pre_trigger.mp4", "", unique_videos[i])
+      timestamp <- strsplit(timestamp, split = "_")[[1]]
+      timestamp <- paste(paste(timestamp[1:3], collapse = "-"), paste(timestamp[4:length(timestamp)], collapse = ":"), sep = " ")
+      timestamp <- as.POSIXct(format(as.POSIXct(timestamp, tz = ""), "%Y-%m-%d %H:%M:%OS6"))
+      timestamp
+      
+      # Then add the start and the end timestamps in seconds from BORIS to this overall timestamp to get complete start and end timestamps that can be compared to the automated data
+      manual_start <- timestamp + tmp_manual$`Start..s.`
+      manual_end <- timestamp + tmp_manual$`Stop..s.`
+      
+      return(
+        data.frame(
+          unique_video_recording_event = unique_videos[i],
+          behavior_label = behavior_labels[n],
+          auto_start = tmp_auto %>% 
+            pull(start),
+          auto_end = tmp_auto %>% 
+            pull(end),
+          manual_start = manual_start,
+          manual_end = manual_end
+        ) %>% 
+          dplyr::mutate(
+            auto_duration = auto_end - auto_start,
+            manual_duration = manual_end - manual_start
+          )
+      )
+      
+    }
+    
+  }))
+  
+}))
+
+
+glimpse(temporal_validtn)
+View(temporal_validtn)
+
+temporal_validtn %>% 
+  dplyr::mutate(
+    start_diff = manual_start - auto_start,
+    end_diff = manual_end - auto_end,
+    dur_diff = manual_duration - auto_duration
+  ) %>% 
+  dplyr::summarise(
+    mean_start_diff = mean(start_diff),
+    mean_end_diff = mean(end_diff),
+    mean_dur_diff = mean(dur_diff)
+  )
+
+```
+
+TKTK continue here
+
+8. Automated data processing: Iterate over parameters that we use for the automated scoring, especially the temporal thresholds used for clustering, to create different automated scoring datasets for the analyses below
 
 Once the pipeline above is developed, then run the full validation analysis pipeline with all 4045 video recording events
