@@ -24,6 +24,15 @@ rm(list = ls())
 
 X <- c("tidyverse", "pbapply", "data.table", "tidyquant")
 
+# Install the packages in X if not already installed
+is_installed <- function(p) is.element(p, installed.packages()[,1])
+
+invisible(lapply(1:length(X), function(x){
+  if(!is_installed(X[x])){
+    install.packages(X[x], repos = "http://lib.stat.cmu.edu/R/CRAN")
+  }
+}))
+
 invisible(lapply(X, library, character.only = TRUE))
 
 # Load the custom functions for computational analyses with ABISSMAL
@@ -50,6 +59,37 @@ if(!dir.exists(indexed_path)){
 }
 
 seed <- 888
+
+```
+
+Initialize functions for calcuting traditional performance metrics.
+```{r}
+
+# Precision = true positives / (true positives + false positives). Out of all of the positive predictions by a method, which were truly positive? 
+# In which X is a data frame in which rows correspond to unique video recording events, and columns indicating the number of true positives and false positives. The following two arguments are the column names for the true and false positives
+precision <- function(X, tps_col_nm, fps_col_nm){
+  # Make sure to return 0 if all values are 0 (which return NaN)
+  prc <- round((X[[tps_col_nm]] / (X[[tps_col_nm]] + X[[fps_col_nm]])) * 100, 2)
+  prc[is.na(prc)] <- 0
+  return(prc)
+}
+
+# Sensitivity = true positives / (true positives + false negatives). This is the same as the recall, or the percentage of the true positives that a method correctly identifies
+# In which X is a data frame in which rows correspond to unique video recording events, and columns indicating the number of true positives and false negatives. The following two arguments are the column names for the true and false negatives
+sensitivity <- function(X, tps_col_nm, fns_col_nm){
+  # Make sure to return 0 if all values are 0
+  rec <- round((X[[tps_col_nm]] / (X[[tps_col_nm]] + X[[fns_col_nm]])) * 100, 2)
+  rec[is.na(rec)] <- 0
+  return(rec)
+}
+
+# Specificity = true negatives / (true negatives + false positives). This captures how well a method calls true negatives and avoids false positives (e.g. false alarms)
+specificity <- function(X, tns_col_nm, fps_col_nm){
+  # Make sure to return 0 if all values are 0
+  rec <- round((X[[tns_col_nm]] / (X[[tns_col_nm]] + X[[fps_col_nm]])) * 100, 2)
+  rec[is.na(rec)] <- 0
+  return(rec)
+}
 
 ```
 
@@ -145,7 +185,7 @@ manual_scoring_nm <- data.table::rbindlist(pblapply(1:nrow(manual_scoring_ss), f
 # Select a few rows at random and manually check the unmasking results
 glimpse(manual_scoring_nm)
 dim(manual_scoring_nm)
-View(manual_scoring_nm)
+# View(manual_scoring_nm)
 
 ```
 
@@ -236,7 +276,7 @@ recording_event_ts <- data.table::rbindlist(pblapply(1:length(unique_video_pats)
 glimpse(recording_event_ts)
 # View(recording_event_ts)
 
-# TKTK the same number of rows should be here compared to the number of videos in the subsample
+# The same number of rows should be here compared to the number of videos in the subsample
 nrow(recording_event_ts) == length(subsample)
 
 ```
@@ -271,7 +311,7 @@ The next step will be to perform automated behavioral scoring of the raw movemen
 
 # Perching events
 
-Find RFID and beam breaker perching events with indexed movement data....TKTK keep thinking about perching events and change the code below.
+Find RFID and beam breaker perching events.
 ```{r find perching events}
 
 detect_perching_events(file_nm = "combined_raw_data_RFID.csv", threshold = 2, run_length = 2, sensor_id_col_nm = "sensor_id", timestamps_col_nm = "timestamp_ms", PIT_tag_col_nm = "PIT_tag_ID", rfid_label = "RFID", outer_irbb_label = NULL, inner_irbb_label = NULL, general_metadata_cols = c("chamber_id", "sensor_id"), path = path, data_dir = "raw_combined", out_dir = "processed", out_file_prefix = "perching_events", tz = "", POSIXct_format = "%Y-%m-%d %H:%M:%OS")
@@ -309,7 +349,7 @@ detect_clusters(file_nms = c("pre_processed_data_IRBB.csv", "pre_processed_data_
 
 ```
 
-Score detection clusters to make inferences about behavioral events associated with these movements. TKTK need to later integrate perching events (), also sensor_id_col_nm, PIT_tag_col_nm cannot be NULL
+Score detection clusters to make inferences about behavioral events associated with these movements.
 ```{r score detection clusters for 3 sensor types}
 
 score_clusters(file_nm = "detection_clusters.csv", rfid_label = "RFID", camera_label = "Camera", outer_irbb_label = "Outer Beam Breaker", inner_irbb_label = "Inner Beam Breaker", video_metadata_col_nms = c("total_pixels_motionTrigger", "video_file_name"), integrate_perching = TRUE, perching_dataset = "RFID-IRBB", perching_prefix = "perching_events_", sensor_id_col_nm = "sensor_id", PIT_tag_col_nm = "PIT_tag_ID", pixel_col_nm = "total_pixels_motionTrigger", video_width = 1280, video_height = 720, integrate_preproc_video = TRUE, video_file_nm = "pre_processed_data_Video.csv", timestamps_col_nm = "timestamp_ms", path = path, data_dir = "processed", out_dir = "processed", out_file_nm = "scored_detectionClusters.csv", tz = "", POSIXct_format = "%Y-%m-%d %H:%M:%OS")
@@ -468,7 +508,6 @@ checking <- paste(recording_event_ts$unique_recording_event_ID, "pre_trigger.mp4
 # Currently there are not more videos assigned to the automated detections than there are in the subsample of manually scored videos, looks good
 auto_scoring_extraAssignedVids$assigned_recording_event[!grepl(paste(checking, collapse = "|"), auto_scoring_extraAssignedVids$assigned_recording_event)]
 
-
 # Then we need to summarize the automated and manually scored data to yield a single row per video recording event, in order to make a 1:1 plot. In this plot, there should be more behavioral states scored manually than using the automated inferences (see my rationale above)
 auto_scoring_summ <- auto_scoring_extraAssignedVids %>%
   # Drop rows that did not have an associated video recording event
@@ -526,23 +565,23 @@ Next steps:
 
 - Start validation analyses at a very coarse-grained scale with the manual scoring as a baseline:
 
-1. OVERALL RECALL IN ACTIVITY DETECTION: First, how well does the integration of 3 movement sensors capture whether birds are inside of the container or not? Can we generally use the automated scores to infer that sensor activity was due to the birds or not? For this analysis, perform integration of data from the 3 sensors for all days of data collection, and then index the scored activities using the timestamps of the manually scored video recording events with a time buffer around them. 
+1. OVERALL ACTIVITY DETECTION: First, how well does the integration of 3 movement sensors capture whether birds are inside of the container or not? Can we generally use the automated scores to infer that sensor activity was due to the birds or not? For this analysis, perform integration of data from the 3 sensors for all days of data collection, and then index the scored activities using the timestamps of the manually scored video recording events with a time buffer around them. 
 
 General approach to calculating detection performance:
 
-For the binary analysis below, we want to know how often ABISSMAL and manual scoring picked up activity versus no activity, regardless of the behavior itself, the individual, or the location (container entrance or inside of the container).
+For the binary analysis below, we want to know how often ABISSMAL and manual scoring picked up activity versus no activity, regardless of the behavior itself, the individual, or the location (container entrance or inside of the container). Throughout this analysis, keep in mind that the manually scored dataset relies on videos recorded by motion detection through ABISSMAL, and therefore we do not have access to a manually scored dataset of continuous video recordings, which would let us address whether activity occurred or not outside of the timestamps of the ABISSMAL automated scores. Later validation work to truly assess the metrics below will require manual scoring of continuous video recordings, accompanied by automated scoring through ABISSMAL (including a separate stream of motion-detection video recordings).
 
-**True positive** = activity detected by both ABISSMAL and manual scoring. How often did ABISSMAL capture activity when activity was also picked up by manual scoring (any of PERC, ENTR, EXIT, INSC)?
+**True positive** = activity was detected by both ABISSMAL and manual scoring. How often did ABISSMAL capture activity when activity was also picked up by manual scoring (any of PERC, ENTR, EXIT, INSC captured by both methods)?
 
-**False negative** = ABISSMAL detects activity, but manual scoring detected a lack of activity. How often did manual scoring find no birds inside of the container for the duration of the video recording event (NOBR) but ABISSMAL detected activity (any of PERC, ENTR, EXIT, INSC)?
+**False negative** = ABISSMAL does not detect activity, but manual scoring detected activity. Currently we cannot assess true negatives for this analysis because the current version of the ABISSMAL functions only infer activity, not the lack of activity.
 
-**False positive** = activity detected by ABISSMAL but not manual scoring (we cannot assess this without continuous video recording)
+**False positive** = ABISSMAL detects activity, but manual scoring detected a lack of activity. How often did manual scoring find no birds inside of the container for the duration of the video recording event (NOBR) but ABISSMAL detected activity (any of PERC, ENTR, EXIT, INSC)?
 
-**True negative** = neither ABISSMAL nor manual scoring detect activity (we cannot assess this without continuous video recording)
+**True negative** = neither ABISSMAL nor manual scoring detect activity. We cannot calculate true negatives for the same reasons as above with false negatives.
 
-We can assess the rate of true positives and the rate of false negatives, which facilitates calculating the recall, or the true positive rate, which is: 
+Overall, we can assess the rate of true positives and the rate of false positives, which facilitates calculating the precision. This metric represents the percentage of the automatically inferred activity labels that were truly positive (e.g. that corresponded to activity scored by a human observer): 
 
-true positives / (true positives + false negatives)
+true positives / (true positives + false positives)
 
 ```{r}
 
@@ -621,11 +660,11 @@ View(manual_table)
 
 ```
 
-**True positive** = activity detected by both ABISSMAL and manual scoring. How often did ABISSMAL capture activity when activity was also picked up by manual scoring (any of PERC, ENTR, EXIT, INSC)?
+**True positive** = activity was detected by both ABISSMAL and manual scoring. How often did ABISSMAL capture activity when activity was also picked up by manual scoring (any of PERC, ENTR, EXIT, INSC captured by both methods)?
 
-**False negative** = ABISSMAL detects activity, but manual scoring detected a lack of activity. How often did manual scoring find no birds inside of the container for the duration of the video recording event (NOBR) but ABISSMAL detected activity (any of PERC, ENTR, EXIT, INSC)?
+**False positive** = ABISSMAL detects activity, but manual scoring detected a lack of activity. How often did manual scoring find no birds inside of the container for the duration of the video recording event (NOBR) but ABISSMAL detected activity (any of PERC, ENTR, EXIT, INSC)?
 
-Then: true positives / (true positives + false negatives)
+Then: precision = true positives / (true positives + false positives)
 
 ```{r}
 
@@ -645,7 +684,7 @@ no_activity_label <- "NOBR"
 
 i <- 1
 
-tp_fn <- data.table::rbindlist(pblapply(1:length(unique_videos), function(i){
+tp_fp <- data.table::rbindlist(pblapply(1:length(unique_videos), function(i){
   
   # Get unique behavioral scores for the given unique recording event from summarized tables of both scoring methods
   auto_scores <- unique(auto_table[grep(unique_videos[i], dimnames(auto_table)[[1]]), ])
@@ -665,7 +704,7 @@ tp_fn <- data.table::rbindlist(pblapply(1:length(unique_videos), function(i){
   # auto_n
   # manual_n
   
-  # Score true positives
+  # Score true positives: both methods identitfied a type of activity
   if(auto_a & manual_a){
     
     true_positive <- 1
@@ -676,14 +715,14 @@ tp_fn <- data.table::rbindlist(pblapply(1:length(unique_videos), function(i){
     
   }
   
-  # Score false negatives
-  if(manual_n & !auto_n){
+  # Score false positives: manual scoring identified NOBR but ABISSMAL detected a type of activity
+  if(!manual_n & auto_n){
     
-    false_negative <- 1
+    false_positive <- 1
     
   } else {
     
-    false_negative <- 0
+    false_positive <- 0
     
   }
   
@@ -691,42 +730,60 @@ tp_fn <- data.table::rbindlist(pblapply(1:length(unique_videos), function(i){
     data.frame(
       unique_video_recording_event = unique_videos[i],
       true_positive = true_positive,
-      false_negative = false_negative
+      false_positive = false_positive
     )
   )
   
 }))
 
 
-glimpse(tp_fn)
+glimpse(tp_fp)
 
 ```
 
-Calculate recall of overall activity detection, which for the current subsample of 50 video recording events was 98.04%.
+Calculate the precision of the overall activity detection, which for the current subsample of 50 video recording events was 100%.
 ```{r}
 
-# Recall is: true positives / (true positives + false negatives)
+# Precision is: true positives / (true positives + false positives)
 
-tp_fn_sum <- tp_fn %>% 
+tp_fp_sum <- tp_fp %>% 
   dplyr::summarise(
     tps = sum(true_positive),
-    fns = sum(false_negative)
+    fps = sum(false_positive)
   )
 
-recall <- round((tp_fn_sum$tps / (tp_fn_sum$tps + tp_fn_sum$fns)) * 100, 2)
-recall
+precision_oa <- precision(X = tp_fp_sum, tps_col_nm = "tps", fps_col_nm = "fps")
+precision_oa
 
 ```
 
 
-2. LOCATION RECALL: Next, focus on asking whether the automated and manual scores label activity by birds at the container entrance and/or inside of the container.
+2. LOCATION INFERENCE: Next, focus on asking whether the automated and manual scores label activity by birds at the container entrance and/or inside of the container. The options here are: container entrance, inside or container, or both. For this analysis, we will use any activity score between the two methods (any of PERC, ENTR, EXIT, INSC), but ask whether the two methods agree in the location of activity. We will also focus only on manual scores of activity, and drop manual scores of no activity (NOBR).
 
-The options here are: container entrance, inside or container, or both. If we do a recall analysis, then we need to calculate true positives and false negatives for each of these classes. 
+Generall approach to calculating detection performance:
 
+**True positive** = activity was detected at the same location(s) by both ABISSMAL and manual scoring. How often did ABISSMAL capture activity in the same location when activity at the same location was also picked up by manual scoring (any activity label, and both methods capture activity at the same location)?
+
+**False negative** = ABISSMAL does not detect activity at a given location(s) where manual scoring detects activity. 
+
+**False positive** = ABISSMAL detects activity at a given location(s), but manual scoring does not.
+
+**True negative** = Neither ABISSMAL nor manual scoring detect activity for a given location(s).
+
+Overall, we can assess both the precision (out of the positive predictions, which are truly positive) and sensitivity (or recall, what percentage of the total positives were predicted) of activity location inferences by ABISSMAL, as well as the the specificity (true negative rate, or how well the true negatives are predicted while avoiding false alarms). Note that false negatives and positives will be the same because they are defined as a mismatch in location scores between methods.
+
+We need to calculate true positives and false negatives, and then each of the performance metrics, for each of the location classes. 
 ```{r}
 
 # Iterate over all the unique videos included in the automated and manual scoring tables to find true positives and false negatives
-unique_videos <- unique(manual_scoring_nm$unmasked_video_file)
+# Also remove video recording events that had a NOBR score only
+# unique(manual_scoring_nm$Behavior)
+
+unique_videos <- manual_scoring_nm %>% 
+  dplyr::filter(!grepl("NOBR", Behavior)) %>% 
+  pull(unmasked_video_file) %>% 
+  unique()
+
 unique_videos
 
 glimpse(auto_table)
@@ -734,8 +791,8 @@ glimpse(manual_table)
 
 # container entrance is "PERC", "ENTR", "EXIT"
 # inside of container is "INSC"
+# it is also possible to score activity at both locations
 
-# TKTK currently this is not coded right for both locations
 # both is "PERC|ENTR|EXIT" and "INSC" 
 locations <- c("container_entrance", "inside_container", "both")
 labels <- list(
@@ -746,22 +803,51 @@ labels <- list(
 
 labels
 
-i <- 1
-n <- 3
+# testing
+# i <- 1
+# n <- 3
 
-tp_fn <- data.table::rbindlist(pblapply(1:length(unique_videos), function(i){
+tp_fp_tn_fn <- data.table::rbindlist(pblapply(1:length(unique_videos), function(i){
   
   # Get unique behavioral scores for the given unique recording event from summarized tables of both scoring methods
   auto_scores <- unique(auto_table[grep(unique_videos[i], dimnames(auto_table)[[1]]), ])
+  auto_scores <- auto_scores[!is.na(auto_scores)]
   
   manual_scores <- unique(manual_table[grep(unique_videos[i], dimnames(manual_table)[[1]]), ])
+  manual_scores <- manual_scores[!is.na(manual_scores)]
   
   # Iterate over locations
   res <- data.table::rbindlist(lapply(1:length(locations), function(n){
     
     # Convert scores to Boolean using the labels associated with the respective location
-    auto <- ifelse(any(labels[[locations[n]]] %in% auto_scores), TRUE, FALSE)
-    manual <- ifelse(any(labels[[locations[n]]] %in% manual_scores), TRUE, FALSE)
+    if(!locations[n] %in% "both"){
+      
+      auto <- ifelse(any(labels[[locations[n]]] %in% auto_scores), TRUE, FALSE)
+      manual <- ifelse(any(labels[[locations[n]]] %in% manual_scores), TRUE, FALSE)
+      
+      # If checking for labels in both locations, then loop over the location labels for a thorough Boolean conversion
+    } else {
+      
+      tmp_labs <- labels[[locations[n]]]
+      
+      tmp_res <- data.table::rbindlist(lapply(1:length(tmp_labs), function(z){
+        
+        auto <- any(grepl(tmp_labs[z], auto_scores))
+        manual <- any(grepl(tmp_labs[z], manual_scores))
+        
+        return(
+          data.frame(
+            auto = auto,
+            manual = manual
+          )
+        )
+        
+      }))
+      
+      auto <- all(tmp_res$auto)
+      manual <- all(tmp_res$manual)
+      
+    }
     
     # Score true positives
     if(auto & manual){
@@ -771,6 +857,28 @@ tp_fn <- data.table::rbindlist(pblapply(1:length(unique_videos), function(i){
     } else {
       
       true_positive <- 0
+      
+    }
+    
+    # Score false positives
+    if(auto & !manual){
+      
+      false_positive <- 1
+      
+    } else {
+      
+      false_positive <- 0
+      
+    }
+    
+    # Score true negatives
+    if(!manual & !auto){
+      
+      true_negative <- 1
+      
+    } else {
+      
+      true_negative <- 0
       
     }
     
@@ -790,6 +898,8 @@ tp_fn <- data.table::rbindlist(pblapply(1:length(unique_videos), function(i){
         unique_video_recording_event = unique_videos[i],
         location = locations[n],
         true_positive = true_positive,
+        false_positive = false_positive,
+        true_negative = true_negative,
         false_negative = false_negative
       )
     )
@@ -800,156 +910,511 @@ tp_fn <- data.table::rbindlist(pblapply(1:length(unique_videos), function(i){
   
 }))
 
-
-glimpse(tp_fn)
-
+# There should be 3 rows per unique video recording event, looks good
+glimpse(tp_fp_tn_fn)
+# View(tp_fp_tn_fn)
 
 ```
 
-TKTK the recall calculation for both locations is not right because the logic above for asking if both labels from both locations are represented is wrong. FIX
-
-Calculate recall of the local of the overall activity detection, which for the current subsample of 50 video recording events was container entrance: 50%, inside container: 88%, and both locations: 100%.
+Calculate precision, recall, sensitivity, and specificity of activity detection by location.
 ```{r}
 
-# Recall is: true positives / (true positives + false negatives)
-
-tp_fn_sum <- tp_fn %>% 
+tp_fp_tn_fn_sum <- tp_fp_tn_fn %>% 
   group_by(location) %>% 
   dplyr::summarise(
     tps = sum(true_positive),
+    fps = sum(false_positive),
+    tns = sum(true_negative),
     fns = sum(false_negative)
-  )
-
-tp_fn_sum
-
-recall_ce <- round((tp_fn_sum %>% 
-                   dplyr::filter(location == "container_entrance") %>% 
-                   pull(tps) / (
-                     tp_fn_sum %>% 
-                   dplyr::filter(location == "container_entrance") %>% 
-                   pull(tps) + 
-                     tp_fn_sum %>% 
-                   dplyr::filter(location == "container_entrance") %>% 
-                   pull(fns))
-                 ) * 100, 2)
-
-recall_ic <- round((tp_fn_sum %>% 
-                   dplyr::filter(location == "inside_container") %>% 
-                   pull(tps) / (
-                     tp_fn_sum %>% 
-                   dplyr::filter(location == "inside_container") %>% 
-                   pull(tps) + 
-                     tp_fn_sum %>% 
-                   dplyr::filter(location == "inside_container") %>% 
-                   pull(fns))
-                 ) * 100, 2)
-
-
-recall_bo <- round((tp_fn_sum %>% 
-                   dplyr::filter(location == "both") %>% 
-                   pull(tps) / (
-                     tp_fn_sum %>% 
-                   dplyr::filter(location == "both") %>% 
-                   pull(tps) + 
-                     tp_fn_sum %>% 
-                   dplyr::filter(location == "both") %>% 
-                   pull(fns))
-                 ) * 100, 2)
-
-recall_ce
-recall_ic
-recall_bo
-
-```
-
-
-3. INDIVIDUAL IDENTITY RECALL: Next, ask how reliably we captured individual identity with RFID compared to the manually scored videos, and how often no PIT tags or only a single PIT was detected when manual video scoring detected 1 tagged adult or 2 inside of the nest container
-
-
-4. Next, ask how well the integrated dataset of movement sensors agrees with the first behavioral score attributed to each video recording event by manual scoring. This is a finer-grained validation to ask if behavioral categories associated with the video recording events match between the two methods. Check out my notes above that detail expectations - there will be more scores per video recording event using the manual method.
-
-Or, TKTK instead focus on asking whether the automated label is found anywhere in the manually scored sequence?
-
-
-TKTK need to select the first label per sequence per video, then compare these.
-
-Build a confusion matrix to visualize the labeling by manual scoring and automated inferences.
-```{r}
-
-table(manual_scoring_nm$Behavior, auto_scoring$inferences)
-
-
-```
-
-
-Consider asking validation questions to account for the coarser-grained temporal resolution of the automated scoring. For instance, when considering the sequence of behavioral events across the time unit represented by each video, how well do the automated inferences and the manual scoring agree on the behavioral label of the first event? Here we should ignore subject
-```{r}
-
-# Here we need to pull information from direction scored, inferredMovement_Location, and add in the perching events (see above) to match the majority of the manual scoring labels (aside from No Birds)
-glimpse(auto_scoring_extraAssignedVids)
-
-glimpse(manual_scoring_nm)
-unique(manual_scoring_nm$Behavior)
-
-# Focus on inside the container, entrances, and exits for now
-# First, get the first behavioral label for each of the unique videos in the manually scored data
-# The tricky thing here will be cases in which there are two behavioral states with the same start timestamp but for different subjects. In this case, we should focus on asking whether the automated score is at least contained within the first manual scores
-tmp_manual <- manual_scoring_nm %>% 
-  dplyr::select(Behavior, Start..s., Stop..s., unmasked_video_file) %>% 
-  group_by(unmasked_video_file) %>% 
-  arrange(Start..s.) %>% 
-  # Filter to retain behavioral states per subject that started at the very start of each video
-  dplyr::filter(
-    Start..s. == 0
   ) %>% 
   ungroup()
 
-# Then for each of these rows in the manually scored data, get the first automated score for the corresponding video
+tp_fp_tn_fn_sum
 
-# i <- 1
-manual_auto_integr <- data.table::rbindlist(lapply(1:nrow(tmp_manual), function(i){
+# Precision across locations
+precision_loc <- sapply(1:length(locations), function(i){
   
-  tmp <- auto_scoring_extraAssignedVids %>% 
-    dplyr::filter(
-      grepl(tmp_manual$unmasked_video_file[i], assigned_recording_event)
-    ) %>%
-    arrange(start) %>% 
-    slice(1) %>% 
-    dplyr::select(direction_scored, inferredMovement_Location)
+  precision(X = tp_fp_tn_fn_sum[grep(locations[i], tp_fp_tn_fn_sum$location), ], tps_col_nm = "tps", fps_col_nm = "fps")
   
-  # The inferred movement location column holds the score "inside container" or INSC in the manually scored data when an exit or entrance wasn't detected
-  if(is.na(tmp$direction_scored)){
+})
+
+# names(precision_loc) <- locations
+precision_loc
+
+# Sensitivity across locations
+sensitivity_loc <- sapply(1:length(locations), function(i){
+  
+  sensitivity(X = tp_fp_tn_fn_sum[grep(locations[i], tp_fp_tn_fn_sum$location), ], tps_col_nm = "tps", fns_col_nm = "fns")
+  
+})
+
+sensitivity_loc
+
+# Specificity across locations
+specificity_loc <- sapply(1:length(locations), function(i){
+  
+  specificity(X = tp_fp_tn_fn_sum[grep(locations[i], tp_fp_tn_fn_sum$location), ], tns_col_nm = "tps", fps_col_nm = "fns")
+  
+})
+
+specificity_loc
+
+# Note that sensitivity and specificity are the same, given the way that false positives and negatives were defined
+
+data.frame(
+  locations = locations,
+  precision = precision_loc,
+  sensitivity = sensitivity_loc,
+  specificity = specificity_loc
+)
+
+```
+
+
+4. RFID DETECTION: Next, ask how reliably the RFID system that ABISSMAL depends on for individual identification captured activity by the PIT-tagged adults compared to manual scoring of subjects. In this analysis, we will focus on asking how often the PIT tags of adults were detected compared to the detection of adult subjects by manual scoring. This is an important coarse-grained validation of the RFID system prior to the finer-grained individual identity validation, because there were non-PIT-tagged birds in the nest container later in development (juveniles) and also because it is common for RFID systems to fail to detect PIT tags moving through RFID antennae.
+
+General approach to calculating RFID detection performance:
+
+**True positive** = Activity by adults was detected by both ABISSMAL (PIT tag detected) and manual scoring (adult subjects detected).
+
+**False negative** = ABISSMAL detected no PIT tag but adult subjects were detected by manual scoring.
+
+**False positive** = ABISSMAL detected a PIT tag but no adult subjects were detected by manual scoring.
+
+**True negative** = Neither ABISSMAL nor manual scoring detected activity by adult birds (no PIT tags detected by ABISSMAL, and no adult subjects detected by manual scoring).
+
+Assess the precision, sensitivity, and specificity of the RFID module used by ABISSMAL.
+
+First we need to condense the automated scoring and the manual scoring data frames to have a single row per video while retaining information about adult activity (PIT tags in the ABISSMAL data, and adult subjects in the manually scored data).
+```{r}
+
+# View(manual_scoring_nm)
+names(manual_scoring_nm)
+
+
+########### Convert the subject labels per dataset
+
+# The subject names for adults in the manually scored data are "Female", "Male", "Unknown_Adult"
+# Subject names for no detections of adults will be all other subject labels: "Juveniles_Pooled", "Juvenile", "No_Birds", and "Bird_of_Unknown_Age" (to be conservative, since such subjects could have been juvenile)
+
+# The unique PIT tag IDs for adults in this dataset are: "01-10-3F-8F-F0" and "01-10-16-CD-1C" 
+# unique(scored_clusters$individual_initiated)
+
+# Convert the subject labels in the manually scored dataset to binary labels: Adult or No Adult
+manual_scoring_nm2 <- manual_scoring_nm %>% 
+  # Replace the subject labels to be "Adult" or "No Adult"
+  dplyr::mutate(
+    Subject_binary = ifelse(Subject %in% c("Female", "Male", "Unknown_Adult"), "Adult", Subject),
+    Subject_binary = ifelse(Subject_binary %in% c("Juveniles_Pooled", "Juvenile", "No_Birds", "Bird_of_Unknown_Age"), "No Adult", Subject_binary)
+  )
+
+# Looks good, only 2 values remain as expected 
+unique(manual_scoring_nm2$Subject_binary)
+
+
+# Get one row of PIT tag IDs per video recording event
+glimpse(auto_scoring2)
+
+# Create a new column that condenses PIT tag IDs from inferences about which individual started a movement event, which individual ended the movement event, and which individual was detected in a perching event
+auto_scoring3 <- auto_scoring2 %>% 
+  dplyr::mutate(
+    PIT_tags = paste(individual_initiated, individual_ended, perching_PIT_tag, sep = " - ")
+  )
+
+glimpse(auto_scoring3)
+unique(auto_scoring3$PIT_tags)
+
+# Convert the subject labels in the ABISSMAL scored dataset to binary labels: Adult or No Adult
+auto_scoring4 <- auto_scoring3 %>% 
+  # Replace the PIT tag labels to be "Adult" or "No Adult"
+  dplyr::mutate(
+    Subject_binary = ifelse(grepl(paste(c("01-10-3F-8F-F0", "01-10-16-CD-1C"), collapse = "|"), PIT_tags), "Adult", PIT_tags),
+    Subject_binary = ifelse(!grepl(paste(c("01-10-3F-8F-F0", "01-10-16-CD-1C"), collapse = "|"), PIT_tags), "No Adult", Subject_binary)
+  )
+
+# Looks good, only the two expected labels remain
+unique(auto_scoring4$Subject_binary)
+
+########### Convert the manual and automated scoring data frames to tables
+
+# Get one row of subject labels per video recording event
+manual_table <- manual_scoring_nm2 %>% 
+  group_by(unmasked_video_file) %>%
+  # Create a unique row identifier within videos
+  dplyr::mutate(
+    row_id = row_number()
+  ) %>% 
+  ungroup() %>% 
+  # View()
+  dplyr::select(row_id, unmasked_video_file, Subject_binary) %>% 
+  pivot_wider(names_from = unmasked_video_file, values_from = Subject_binary) %>% 
+  t()
+
+
+auto_table <- auto_scoring4 %>% 
+  group_by(assigned_recording_event) %>%
+  # Create a unique row identifier within videos
+  dplyr::mutate(
+    row_id = row_number()
+  ) %>% 
+  ungroup() %>% 
+  # View()
+  dplyr::select(row_id, assigned_recording_event, Subject_binary) %>% 
+  pivot_wider(names_from = assigned_recording_event, values_from = Subject_binary) %>% 
+  t()
+
+View(auto_table)
+View(manual_table)
+
+```
+
+In this analysis, we need to remove video recording events that only included activity scored inside of the container, for a fair validation of the RFID system. The RFID antennae is mounted in the container entrance, so it can only detect activity by individuals at this location. We included videos that had activity scored for birds of an unknown age, but did not consider this subject label an adult detection to be conservative.
+```{r}
+
+# Iterate over all the unique videos included in the automated and manual scoring tables to find true positives and false negatives
+# Remove video recording events that had INSC scores only
+# unique(manual_scoring_nm$Behavior)
+
+unique_videos <- manual_scoring_nm %>%
+  # This filter will drop any rows with the INSC label
+  # But since there are multiple rows per unique recording event, video recording events that had other labels will be retained in the unique() call below
+  dplyr::filter(grepl("INSC", Behavior)) %>% 
+  pull(unmasked_video_file) %>% 
+  unique()
+
+unique_videos
+
+glimpse(auto_table)
+glimpse(manual_table)
+
+# testing
+# i <- 10
+
+tp_fp_tn_fn <- data.table::rbindlist(pblapply(1:length(unique_videos), function(i){
+  
+  # Get unique subject labels for the given unique recording event from summarized tables of both scoring methods
+  auto_scores <- unique(auto_table[grep(unique_videos[i], dimnames(auto_table)[[1]]), ])
+  auto_scores <- auto_scores[!is.na(auto_scores)]
+  
+  manual_scores <- unique(manual_table[grep(unique_videos[i], dimnames(manual_table)[[1]]), ])
+  manual_scores <- manual_scores[!is.na(manual_scores)]
+  
+  auto_scores
+  manual_scores
+  
+  # Convert scores to Boolean using the adult activity label
+  auto_a <- ifelse(any("Adult" %in% auto_scores), TRUE, FALSE)
+  manual_a <- ifelse(any("Adult" %in% manual_scores), TRUE, FALSE)
+  
+  # Convert scores to Boolean using the no adult activity label
+  auto_n <- ifelse(any("No Adult" %in% auto_scores), TRUE, FALSE)
+  manual_n <- ifelse(any("No Adult" %in% manual_scores), TRUE, FALSE)
+  
+  # Score true positives: both methods identitfied a type of activity
+  if(auto_a & manual_a){
     
-    inference <- tmp$inferredMovement_Location
+    true_positive <- 1
     
   } else {
     
-    inference <- tmp$direction_scored
+    true_positive <- 0
+    
+  }
+  
+  # Score false positives: manual scoring identified no adult activity but ABISSMAL did
+  if(manual_n & auto_a){
+    
+    false_positive <- 1
+    
+  } else {
+    
+    false_positive <- 0
+    
+  }
+  
+  # Score true negatives: both methods identified no adult activity
+  if(auto_n & manual_n){
+    
+    true_negative <- 1
+    
+  } else {
+    
+    true_negative <- 0
+    
+  }
+  
+  # Score false negatives: manual scoring identified adult activity but ABISSMAL did not
+  if(manual_a & auto_n){
+    
+    false_negative <- 1
+    
+  } else {
+    
+    false_negative <- 0
+    
   }
   
   return(
-    
-    tmp_manual %>% 
-      slice(i) %>% 
-      dplyr::mutate(
-        first_auto_inference = inference
-      )
+    data.frame(
+      unique_video_recording_event = unique_videos[i],
+      true_positive = true_positive,
+      false_positive = false_positive,
+      true_negative = true_negative,
+      false_negative = false_negative
+    )
   )
   
 }))
 
-# TKTK continue
-View(manual_auto_integr)
 
+# There should be 1 row per unique video recording event, looks good
+glimpse(tp_fp_tn_fn)
+# View(tp_fp_tn_fn)
+
+```
+
+Calculate precision, recall, sensitivity, and specificity of the RFID module, which ABISSMAL uses to detect activity by each adult individual.
+```{r}
+
+tp_fp_tn_fn_sum <- tp_fp_tn_fn %>% 
+  dplyr::summarise(
+    tps = sum(true_positive),
+    fps = sum(false_positive),
+    tns = sum(true_negative),
+    fns = sum(false_negative)
+  )
+
+tp_fp_tn_fn_sum
+
+data.frame(
+  precision = precision(X = tp_fp_tn_fn_sum, tps_col_nm = "tps", fps_col_nm = "fps"),
+  sensitivity = sensitivity(X = tp_fp_tn_fn_sum, tps_col_nm = "tps", fns_col_nm = "fns"),
+  specificity = specificity(X = tp_fp_tn_fn_sum, tns_col_nm = "tps", fps_col_nm = "fns")
+)
 
 ```
 
 
-5. Fifth, use the videos selected for entire days of data collection for another fine-grained validation analysis to ask how well the automated integration of sensors picks up long sequences of behavioral events throughout the day, compared to the manually scored videos. Here the caveat will be that we do not have continuous video recordings, so there will likely be more activity scored across each day by the automated methods. Instead, focus on asking how well the two methods concide in identifying sequential behaviors across the ethogram used for validation (perching, enter, exit, inside container)
+4. INDIVIDUAL IDENTITY DETECTION: Next, ask how reliably we captured individual identity with RFID compared to the manually scored videos. In this analysis, we will rely on the RFID data for the automated detection of individuals, which will have data for the PIT-tagged adults only. Focus this analysis on asking how often each PIT tag was detected for each adult compared to the manual scoring, and then both PIT tags when manual scoring identified activity by both adults (three overall levels of individual identity detection performance).
 
+Generall approach to calculating individual identity detection performance:
+
+**True positive** = The same individual(s) were detected by both ABISSMAL and manual scoring.
+
+**False negative** = ABISSMAL detected either no PIT tag or the incorrect PIT tag compared to the individual identity detected by manual scoring. 
+
+**False positive** = ABISSMAL detected a PIT tag or the incorrect PIT tag compared to the individual identity detected by manual scoring, which detected .
+
+**True negative** = Neither ABISSMAL nor manual scoring detect activity for a given location(s).
+
+Overall, we can assess both the precision (out of the positive predictions, which are truly positive) and sensitivity (or recall, what percentage of the total positives were predicted) of activity location inferences by ABISSMAL, as well as the the specificity (true negative rate, or how well the true negatives are predicted while avoiding false alarms). Note that false negatives and positives will be the same because they are defined as a mismatch in location scores between methods.
+
+We need to calculate true positives and false negatives, and then each of the performance metrics, for each of the location classes. 
+
+TKTK update the code below and modify for individual identity detection.
+```{r}
+
+# Iterate over all the unique videos included in the automated and manual scoring tables to find true positives and false negatives
+# Also remove video recording events that had a NOBR score only
+# unique(manual_scoring_nm$Behavior)
+
+unique_videos <- manual_scoring_nm %>% 
+  dplyr::filter(!grepl("NOBR", Behavior)) %>% 
+  pull(unmasked_video_file) %>% 
+  unique()
+
+unique_videos
+
+glimpse(auto_table)
+glimpse(manual_table)
+
+# container entrance is "PERC", "ENTR", "EXIT"
+# inside of container is "INSC"
+# it is also possible to score activity at both locations
+
+# TKTK currently this is not coded right for both locations
+# both is "PERC|ENTR|EXIT" and "INSC" 
+locations <- c("container_entrance", "inside_container", "both")
+labels <- list(
+  "container_entrance" = c("PERC", "ENTR", "EXIT"),
+  "inside_container" = c("INSC"),
+  "both" = c("PERC|ENTR|EXIT", "INSC")
+)
+
+labels
+
+# testing
+# i <- 1
+# n <- 3
+
+tp_fp_tn_fn <- data.table::rbindlist(pblapply(1:length(unique_videos), function(i){
+  
+  # Get unique behavioral scores for the given unique recording event from summarized tables of both scoring methods
+  auto_scores <- unique(auto_table[grep(unique_videos[i], dimnames(auto_table)[[1]]), ])
+  auto_scores <- auto_scores[!is.na(auto_scores)]
+  
+  manual_scores <- unique(manual_table[grep(unique_videos[i], dimnames(manual_table)[[1]]), ])
+  manual_scores <- manual_scores[!is.na(manual_scores)]
+  
+  # Iterate over locations
+  res <- data.table::rbindlist(lapply(1:length(locations), function(n){
+    
+    # Convert scores to Boolean using the labels associated with the respective location
+    if(!locations[n] %in% "both"){
+      
+      auto <- ifelse(any(labels[[locations[n]]] %in% auto_scores), TRUE, FALSE)
+      manual <- ifelse(any(labels[[locations[n]]] %in% manual_scores), TRUE, FALSE)
+      
+      # If checking for labels in both locations, then loop over the location labels for a thorough Boolean conversion
+    } else {
+      
+      tmp_labs <- labels[[locations[n]]]
+      
+      tmp_res <- data.table::rbindlist(lapply(1:length(tmp_labs), function(z){
+        
+        auto <- any(grepl(tmp_labs[z], auto_scores))
+        manual <- any(grepl(tmp_labs[z], manual_scores))
+        
+        return(
+          data.frame(
+            auto = auto,
+            manual = manual
+          )
+        )
+        
+      }))
+      
+      auto <- all(tmp_res$auto)
+      manual <- all(tmp_res$manual)
+      
+    }
+    
+    # Score true positives
+    if(auto & manual){
+      
+      true_positive <- 1
+      
+    } else {
+      
+      true_positive <- 0
+      
+    }
+    
+    # Score false positives
+    if(auto & !manual){
+      
+      false_positive <- 1
+      
+    } else {
+      
+      false_positive <- 0
+      
+    }
+    
+    # Score true negatives
+    if(!manual & !auto){
+      
+      true_negative <- 1
+      
+    } else {
+      
+      true_negative <- 0
+      
+    }
+    
+    # Score false negatives
+    if(manual & !auto){
+      
+      false_negative <- 1
+      
+    } else {
+      
+      false_negative <- 0
+      
+    }
+    
+    return(
+      data.frame(
+        unique_video_recording_event = unique_videos[i],
+        location = locations[n],
+        true_positive = true_positive,
+        false_positive = false_positive,
+        true_negative = true_negative,
+        false_negative = false_negative
+      )
+    )
+    
+  }))
+  
+  return(res)
+  
+}))
+
+# There should be 3 rows per unique video recording event, looks good
+glimpse(tp_fp_tn_fn)
+# View(tp_fp_tn_fn)
+
+```
+
+Calculate precision, recall, sensitivity, and specificity of activity detection by location.
+```{r}
+
+tp_fp_tn_fn_sum <- tp_fp_tn_fn %>% 
+  group_by(location) %>% 
+  dplyr::summarise(
+    tps = sum(true_positive),
+    fps = sum(false_positive),
+    tns = sum(true_negative),
+    fns = sum(false_negative)
+  ) %>% 
+  ungroup()
+
+tp_fp_tn_fn_sum
+
+# Precision across locations
+precision_loc <- sapply(1:length(locations), function(i){
+  
+  precision(X = tp_fp_tn_fn_sum[grep(locations[i], tp_fp_tn_fn_sum$location), ], tps_col_nm = "tps", fps_col_nm = "fps")
+  
+})
+
+# names(precision_loc) <- locations
+precision_loc
+
+# Sensitivity across locations
+sensitivity_loc <- sapply(1:length(locations), function(i){
+  
+  sensitivity(X = tp_fp_tn_fn_sum[grep(locations[i], tp_fp_tn_fn_sum$location), ], tps_col_nm = "tps", fns_col_nm = "fns")
+  
+})
+
+sensitivity_loc
+
+# Specificity across locations
+specificity_loc <- sapply(1:length(locations), function(i){
+  
+  specificity(X = tp_fp_tn_fn_sum[grep(locations[i], tp_fp_tn_fn_sum$location), ], tns_col_nm = "tps", fps_col_nm = "fns")
+  
+})
+
+specificity_loc
+
+# Note that sensitivity and specificity are the same, given the way that false positives and negatives were defined
+
+data.frame(
+  locations = locations,
+  precision = precision_loc,
+  sensitivity = sensitivity_loc,
+  specificity = specificity_loc
+)
+
+```
+
+
+
+5. BEHAVIORAL INFERENCE: Next, ask how well the integrated dataset of movement sensors scored the TYPE of activity detected. This is a finer-grained validation to ask if behavioral categories associated with the video recording events match between the two methods. Check out my notes above that detail expectations - there will be more scores per video recording event using the manual method.
 
 6. Automated data processing: Iterate over parameters that we use for the automated scoring, especially the temporal thresholds used for clustering, to create different automated scoring datasets for the analyses below
-
 
 
 Once the pipeline above is developed, then run the full validation analysis pipeline with all 4045 video recording events
