@@ -313,26 +313,48 @@ The next step will be to perform automated behavioral scoring of the raw movemen
 
 # Perching events
 
-Find RFID and beam breaker perching events.
+Find RFID and beam breaker perching events. Iterate over different temporal thresholds used to label stretches of detections as perching events.
 ```{r find perching events}
 
-detect_perching_events(file_nm = "combined_raw_data_RFID.csv", threshold = 2, run_length = 2, sensor_id_col_nm = "sensor_id", timestamps_col_nm = "timestamp_ms", PIT_tag_col_nm = "PIT_tag_ID", rfid_label = "RFID", outer_irbb_label = NULL, inner_irbb_label = NULL, general_metadata_cols = c("chamber_id", "sensor_id"), path = path, data_dir = "raw_combined", out_dir = "processed", out_file_prefix = "perching_events", tz = "", POSIXct_format = "%Y-%m-%d %H:%M:%OS")
+ths <- c(0.1, 0.2, 1, 2, 4) # temporal thresholds in seconds
 
-detect_perching_events(file_nm = "combined_raw_data_IRBB.csv", threshold = 2, run_length = 2, sensor_id_col_nm = "sensor_id", timestamps_col_nm = "timestamp_ms", PIT_tag_col_nm = NULL, rfid_label = NULL, outer_irbb_label = "Outer Beam Breaker", inner_irbb_label = "Inner Beam Breaker", general_metadata_cols = c("chamber_id", "sensor_id"), path = path, data_dir = "raw_combined", out_dir = "processed", out_file_prefix = "perching_events", tz = "", POSIXct_format = "%Y-%m-%d %H:%M:%OS")
+invisible(pblapply(1:length(ths), function(thx){
+  
+  detect_perching_events(file_nm = "combined_raw_data_RFID.csv", threshold = ths[thx], run_length = 2, sensor_id_col_nm = "sensor_id", timestamps_col_nm = "timestamp_ms", PIT_tag_col_nm = "PIT_tag_ID", rfid_label = "RFID", outer_irbb_label = NULL, inner_irbb_label = NULL, general_metadata_cols = c("chamber_id", "sensor_id"), path = path, data_dir = "raw_combined", out_dir = "processed", out_file_prefix = paste("perching_events_th-", ths[thx], sep = ""), tz = "", POSIXct_format = "%Y-%m-%d %H:%M:%OS")
+  
+}))
+
+invisible(pblapply(1:length(ths), function(thx){
+  
+  detect_perching_events(file_nm = "combined_raw_data_IRBB.csv", threshold = ths[thx], run_length = 2, sensor_id_col_nm = "sensor_id", timestamps_col_nm = "timestamp_ms", PIT_tag_col_nm = NULL, rfid_label = NULL, outer_irbb_label = "Outer Beam Breaker", inner_irbb_label = "Inner Beam Breaker", general_metadata_cols = c("chamber_id", "sensor_id"), path = path, data_dir = "raw_combined", out_dir = "processed", out_file_prefix = paste("perching_events_th-", ths[thx], sep = ""), tz = "", POSIXct_format = "%Y-%m-%d %H:%M:%OS")
+  
+}))
 
 ```
 
 # Pre-processing raw data
 
-Pre-process the RFID, beam breaker, and video data for the indexed detections per sensor.
+Pre-process the RFID, beam breaker, and video data for the indexed detections per sensor. Iterate over different temporal thresholds used to remove beam breaker and RFID detections that were very close together.
+
+TKTK update code, need to either update the function below to include a prefix, or instead run all functions together per temporal threshold and save these in separate directories by threshold value.
 ```{r preprocess data}
 
-# Used thinning with a threshold of 2 seconds for beam breakers as well
-preprocess_detections(sensor = "IRBB", timestamps_col_nm = "timestamp_ms", group_col_nm = "sensor_id", pixel_col_nm = NULL, mode = "thin", thin_threshold = 2, pixel_threshold = NULL, drop_tag = NULL, path = path, data_dir = "raw_combined", out_dir = "processed", tz = "", POSIXct_format = "%Y-%m-%d %H:%M:%OS")
+ths <- c(0.1, 0.2, 1, 2, 4) # temporal thresholds in seconds
+
+invisible(pblapply(1:length(ths), function(thx){
+  
+  # Used thinning with a threshold of 2 seconds for beam breakers as well
+  preprocess_detections(sensor = "IRBB", timestamps_col_nm = "timestamp_ms", group_col_nm = "sensor_id", pixel_col_nm = NULL, mode = "thin", thin_threshold = 2, pixel_threshold = NULL, drop_tag = NULL, path = path, data_dir = "raw_combined", out_dir = "processed", tz = "", POSIXct_format = "%Y-%m-%d %H:%M:%OS")
+  
+}))
 
 # Performed pre-processing with a threshold of 2 seconds for RFID because I removed the timestamp difference rounding
 # The PIT tag IDs specified in `drop_tag` were tags I used for testing the RFID antenna and were not used to mark birds
-preprocess_detections(sensor = "RFID", timestamps_col_nm = "timestamp_ms", group_col_nm = "PIT_tag_ID", pixel_col_nm = NULL, mode = "thin", thin_threshold = 2, pixel_threshold = NULL, drop_tag = c("01-10-3F-84-FC", "01-10-16-B8-7F"), path = path, data_dir = "raw_combined", out_dir = "processed", tz = "", POSIXct_format = "%Y-%m-%d %H:%M:%OS")
+invisible(pblapply(1:length(ths), function(thx){
+  
+  preprocess_detections(sensor = "RFID", timestamps_col_nm = "timestamp_ms", group_col_nm = "PIT_tag_ID", pixel_col_nm = NULL, mode = "thin", thin_threshold = 2, pixel_threshold = NULL, drop_tag = c("01-10-3F-84-FC", "01-10-16-B8-7F"), path = path, data_dir = "raw_combined", out_dir = "processed", tz = "", POSIXct_format = "%Y-%m-%d %H:%M:%OS")
+  
+}))
 
 # Used a pixel threshold of 1000 for video data. Since we used 9000 pixels as the sensitivity threshold for motion detection, this filtering threshold will not drop any data
 # This filtering should not drop any videos in the indexed data, and looks good, 100 rows remain
@@ -1822,7 +1844,7 @@ temporal_validtn <- data.table::rbindlist(pblapply(1:length(unique_videos), func
         dplyr::filter(Behavior == behavior_labels[n]) %>% 
         slice(1)
       
-       # If the current behavior was INSC, then update the end timestamp automatically assigned by ABISSMAL to instead be the end of the unique recording event
+      # If the current behavior was INSC, then update the end timestamp automatically assigned by ABISSMAL to instead be the end of the unique recording event
       # Pull the duration of the given recording event from the manually scored dataset (BORIS returns this information automatically)
       if(behavior_labels[n] == "INSC"){
         
