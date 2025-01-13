@@ -1908,8 +1908,4 @@ temporal_validtn %>%
 
 ```
 
-TKTK continue here
-
-8. Automated data processing: Iterate over parameters that we use for the automated scoring, especially the temporal thresholds used for clustering, to create different automated scoring datasets for the analyses below
-
 Once the pipeline above is developed, then run the full validation analysis pipeline with all 4045 video recording events
