@@ -412,6 +412,13 @@ system.time(
   
 )
 
+# This process needs to be more computationally efficient for when we scale up to the full dataset of video recording events scored manually
+# Consider moving the indexing into a separate loop structure
+# Also consider using fewer parameter combinations given pretty constant preliminary results
+# 09h 13m 47s on Mac Mini
+# user    system   elapsed 
+# 8646.857   318.719 33227.329 
+
 
 ```
 
@@ -420,8 +427,10 @@ system.time(
 Read in spreadsheets written by score_clusters across iterations of automated movement data processing and integration by ABISSMAL, and index this data to focus on periods of time similar to the manually scored data (a buffer of two seconds before and after each unique video recording event).
 ```{r}
 
-files <- list.files(path, pattern = "indexed_scored_")
+files <- list.files(file.path(path, "processed"), pattern = "indexedscored_")
+length(files)
 
+# i <- 45
 combined_auto_results <- data.table::rbindlist(pblapply(1:length(files), function(i){
   
   res <- read.csv(file.path(path, "processed", files[i]))  %>% 
@@ -429,67 +438,100 @@ combined_auto_results <- data.table::rbindlist(pblapply(1:length(files), functio
     dplyr::mutate(
       start = as.POSIXct(format(as.POSIXct(start, tz = ""), "%Y-%m-%d %H:%M:%OS6")),
       end = as.POSIXct(format(as.POSIXct(end, tz = ""), "%Y-%m-%d %H:%M:%OS6"))
-    )
+    ) %>% 
+    # Remove the row names introduced above
+    dplyr::select(-c("X"))
+  
+  # glimpse(res)
+  
+}), fill = TRUE)
 
-}))
-
-
+# Edge columns beyond Edge_2 appear after all other columns because some spreadsheets did not have this many edges (filled with NAs by rbindlist() ) and others did, so this column arrangement is expected
 glimpse(combined_auto_results)
+
+# There's a strikingly few and similar number of rows here per parameter combination, which generally means that the overall amount of activity detected should be pretty similar across parameter combinations. Curerntly this is very likely due to the fact that I'm using a small subsample of videos to develop this code
+combined_auto_results %>% 
+  group_by(perching_th_s, preprocess_th_s, detect_th_s) %>% 
+  dplyr::summarise(
+    n = n()
+  ) %>% 
+  print(n = nrow(.))
 
 # Write out the combined results as a single spreadsheet
 combined_auto_results %>% 
-  write.csv(file.path(path, "processed", paste("combined_indexed_automated_behavioral_inferences.csv", sep = "")))
+  write.csv(file.path(path, "processed", paste("combined_indexed_automated_behavioral_inferences.csv", sep = "")), row.names = FALSE)
 
 ```
 
-Get the automated and manual datasets are in similar format in order to make a 1:1 plot for the first validation analysis and figure.
-
-TKTK consider whether each automatically identified event needs to be matched with a unique video recording event for this analysis.
+Plot the overall amount of activity per parameter combination while using the collapse manual scoring dataset as a baseline. Across all videos.
 ```{r}
 
-auto_scoring <- read.csv(file.path(indexed_path, "combined_indexed_automated_behavioral_inferences.csv")) %>%
+glimpse(manual_scoring_nm_coll)
+
+combined_auto_results <- read.csv(file.path(path, "processed", paste("combined_indexed_automated_behavioral_inferences.csv", sep = "")))
+glimpse(combined_auto_results)
+
+# Calculate the number of activities (rows) identified per method and parameter combination, then combine into a single data frame for plotting
+manual_scoring_nm_coll %>% 
+  dplyr::summarise(
+    n = nrow(.)
+  ) %>% 
+  dplyr::mutate(
+    method = "manual"
+  ) %>% 
+  # glimpse()
+  bind_rows(
+    combined_auto_results %>% 
+      group_by(perching_th_s, preprocess_th_s, detect_th_s) %>% 
+      dplyr::summarise(
+        n = n()
+      ) %>% 
+      dplyr::mutate(
+        method = paste("auto", perching_th_s, preprocess_th_s, detect_th_s, sep = "-")
+      ) %>% 
+      ungroup() %>% 
+      dplyr::select(-c("perching_th_s", "preprocess_th_s", "detect_th_s"))
+  ) %>%
+  # glimpse()
+  # View()
+  ggplot(aes(x = method, y = n)) +
+  geom_col() + 
+  theme_bw() +
+  theme(
+    axis.text = element_text(angle = 90)
+  )
+
+```
+
+For preliminary analyses with 50 randomly sampled video recording events, automated scoring consistently identified about 30 events less than manual scoring (80 events total, compared to 50 - 53 events identified by automated processing with different parameter combinations).
+
+Then the same plot, but a 1:1 plot with the video recording events on the x-axis and each parameter combination as a facet...lots of facets.
+
+Get the automated and manual datasets are in similar format in order to make a 1:1 plot for the first validation analysis and figure.
+
+```{r}
+
+combined_auto_results <- read.csv(file.path(path, "processed", paste("combined_indexed_automated_behavioral_inferences.csv", sep = ""))) %>% 
   # Make sure that the timestamps are in the right format
   dplyr::mutate(
     start = as.POSIXct(format(as.POSIXct(start, tz = ""), "%Y-%m-%d %H:%M:%OS6")),
     end = as.POSIXct(format(as.POSIXct(end, tz = ""), "%Y-%m-%d %H:%M:%OS6"))
   )
 
-# Check out the automated inferences and the manual scoring results (filtered by the subsample of videos used to develop this code, and unmasked)
-# glimpse(auto_scoring)
-# glimpse(manual_scoring_nm)
-
-# View(auto_scoring)
-# View(manual_scoring_nm)
-
-# These columns contain the name of the video file associated with each event that was scored. The automated inferences will have NAs in this column when a video recording event was not associated with the given event
-# auto_scoring$video_file_name
-# manual_scoring_nm$unmasked_video_file
-
-# The manual scoring protocol was oriented to score several behavioral states (and per subject) across each video recording event, while the automated scoring can identify multiple behavioral events associated with each video recording event, but is less likely to identify as many as the manual scoring given that we have more limited individual resolution (RFID at the container entrance only, and this can fail to detect PIT tags). In the automated inferences, are there cases when a single video recording event was used for more than one behavioral score?
-
-# Yes, although in this subsample of the data there is only 1 video recording event that meets this condition
-# length(auto_scoring$video_file_name[!is.na(auto_scoring$video_file_name)])
-# length(unique(auto_scoring$video_file_name[!is.na(auto_scoring$video_file_name)]))
-# which(duplicated(auto_scoring$video_file_name[!is.na(auto_scoring$video_file_name)]))
-# auto_scoring$video_file_name[!is.na(auto_scoring$video_file_name)][3]
-# Box_03_2023_7_22_13_24_42_pre_trigger.mp4
-
-# auto_scoring %>% 
-# dplyr::filter(video_file_name == "Box_03_2023_7_22_13_24_42_pre_trigger.mp4") %>% 
-# View()
+glimpse(combined_auto_results)
 
 # How many automated scores have no associated video?
-# Two rows
-auto_scoring %>% 
+# 33 rows
+combined_auto_results %>% 
   dplyr::filter(is.na(video_file_name)) %>% 
   nrow()
 
 # Iterate over rows in the automated scores, and for scored events not associated with videos, figure out whether those timestamps align with the start and end of a unique recording event with the added time buffer on either end
-auto_scoring_extraAssignedVids <- data.table::rbindlist(lapply(1:nrow(auto_scoring), function(i){
+combined_auto_results_extraAssignedVids <- data.table::rbindlist(lapply(1:nrow(combined_auto_results), function(i){
   
   # cat(paste("i = ", i, "\n", sep = " "))
   
-  tmp_auto <- auto_scoring %>% 
+  tmp_auto <- combined_auto_results %>% 
     slice(i)
   
   if(is.na(tmp_auto$video_file_name)){
@@ -500,7 +542,7 @@ auto_scoring_extraAssignedVids <- data.table::rbindlist(lapply(1:nrow(auto_scori
       dplyr::filter(
         start_event >= tmp_auto$start & end_event <= (tmp_auto$start + 18)
       )
-
+    
     # Perform a search for events that occurred in the middle of a video recording if the search above didn't return results
     if(nrow(tmp) == 0){
       
@@ -545,60 +587,97 @@ auto_scoring_extraAssignedVids <- data.table::rbindlist(lapply(1:nrow(auto_scori
 }))
 
 
-glimpse(auto_scoring_extraAssignedVids)
+glimpse(combined_auto_results_extraAssignedVids)
 
-# All values that are missing the suffix "pre-trigger" or "post-trigger" were assigned in the loop above
-unique(auto_scoring_extraAssignedVids$assigned_recording_event)
-
-checking <- paste(recording_event_ts$unique_recording_event_ID, "pre_trigger.mp4", sep = "")
+# No missing values
+unique(combined_auto_results_extraAssignedVids$assigned_recording_event)
 
 # Currently there are not more videos assigned to the automated detections than there are in the subsample of manually scored videos, looks good
-auto_scoring_extraAssignedVids$assigned_recording_event[!grepl(paste(checking, collapse = "|"), auto_scoring_extraAssignedVids$assigned_recording_event)]
+checking <- paste(recording_event_ts$unique_recording_event_ID, "pre_trigger.mp4", sep = "")
+
+combined_auto_results_extraAssignedVids$assigned_recording_event[!grepl(paste(checking, collapse = "|"), combined_auto_results_extraAssignedVids$assigned_recording_event)]
 
 ```
 
 Then we need to summarize the automated and manually scored data to yield a single row per video recording event, in order to make a 1:1 plot. 
 ```{r}
 
-# In this plot, there should be more behavioral states scored manually than using the automated inferences (see my rationale above)
-auto_scoring_summ <- auto_scoring_extraAssignedVids %>%
+# In this plot, there should be more behavioral states scored manually than using the automated inferences, as we found above
+auto_scoring_summ <- combined_auto_results_extraAssignedVids %>%
   # Drop rows that did not have an associated video recording event
   dplyr::filter(!is.na(video_file_name)) %>% 
-  group_by(video_file_name) %>% 
+  group_by(video_file_name, perching_th_s, preprocess_th_s, detect_th_s) %>% 
   dplyr::summarise(
     n_events = n()
-  )
+  ) %>% 
+  dplyr::mutate(
+    method = paste("auto", perching_th_s, preprocess_th_s, detect_th_s, sep = "-")
+  ) %>% 
+  ungroup() %>% 
+  dplyr::select(-c("perching_th_s", "preprocess_th_s", "detect_th_s"))
 
 manual_scoring_nm_summ <- manual_scoring_nm %>% 
   group_by(unmasked_video_file) %>% 
   dplyr::summarise(
     n_events = n()
-  )
+  ) %>% 
+  dplyr::mutate(
+    method = "manual"
+  ) %>%
+  ungroup()
 
 glimpse(auto_scoring_summ)
 glimpse(manual_scoring_nm_summ)
+
+```
+
+```{r}
+
+param_combs <- unique(auto_scoring_summ$method)
 
 # Merge this data together and make a plot
 gg_res <- auto_scoring_summ %>% 
   dplyr::mutate(
     type = "automated_inference"
   ) %>% 
+  group_by(type) %>% 
+  dplyr::mutate(
+    group_row_id = row_number()
+  ) %>% 
+  ungroup() %>% 
+  # glimpse()
   bind_rows(
-    manual_scoring_nm_summ %>%
-      dplyr::rename(
-        `video_file_name` = "unmasked_video_file"
-      ) %>% 
-      dplyr::mutate(
-        type = "manual_scoring"
-      )
+    # Bind one copy of the manually scored data per automated paramater combination
+    lapply(
+      1:length(param_combs), function(i){
+        manual_scoring_nm_summ %>%
+          dplyr::rename(
+            `video_file_name` = "unmasked_video_file"
+          ) %>% 
+          dplyr::mutate(
+            method = param_combs[i],
+            type = "manual_scoring"
+          ) %>% 
+          dplyr::mutate(
+            group_row_id = row_number()
+          )
+      }
+    )
   )
+
+glimpse(gg_res)
+
+# TKTK automated scores are missing for video Box_03_2023_8_7_16_42_00_pre_trigger.mp4
 
 # This result makes sense given the coarser-grained temporal resolution of the automated scoring 
 gg_res %>% 
-  pivot_wider(id_cols = video_file_name, names_from = type, values_from = "n_events") %>%
-  dplyr::arrange(automated_inference, manual_scoring) %>% 
+  pivot_wider(id_cols = c(video_file_name, method), names_from = type, values_from = "n_events") %>%
+  # View()
+  # glimpse()
+  # dplyr::arrange(automated_inference, manual_scoring) %>% 
   ggplot(aes(x = manual_scoring, y = automated_inference)) +
-  geom_point() +
+  facet_wrap(~ method) +
+  geom_point(alpha = 0.25) +
   geom_jitter(width = 0.25, height = 0.25) +
   geom_abline(slope = 1, linetype = "dotted") +
   scale_y_continuous(limits = c(0, max(gg_res$n_events)), breaks = seq(0, max(gg_res$n_events), 1)) +
@@ -607,9 +686,17 @@ gg_res %>%
   ylab("Behavioral events obtained by automated inference") +
   theme_bw() +
   theme(
-    panel.grid.minor = element_blank()
+    panel.grid.minor = element_blank(),
+    panel.grid.major = element_blank()
   )
 
 ```
 
+Then end with a sensitivity analysis across automated processing parameter combinations at this coarse-grained scale. Use this analysis to find parameter combinations with the highest sensitivity, and use one of those combinations for the next set of analyses at a finer-grained scale.
+```{r}
+
+
+
+
+```
 
