@@ -144,49 +144,6 @@ dim(manual_scoring_nm)
 
 ```
 
-# Step 1. Coarse-grain the manually scored dataset across individual subjects
-
-In order to compare overall patterns of activity (regardless of the specific behavioral type that was scored) between manual scoring and ABSSMAL automated inference, we need to make sure that the datasets also display a similar level of resolution of individual identity. The manually scored dataset has the finest resolution of individual identity within the video recording events, and even includes individual identity of birds that were not PIT-tagged for individual identity detection via the RFID system. The automated inferences by ABISSMAL, on the other hand, rely on the RFID system only for individual identity detection, and therefore individual identity cannot be resolved for all individuals without PIT-tags (all chicks throughout development). In addition, RFID systems can fail to detect PIT tags (which will be validated in the next script), so the resolution of individual identity of even the two PIT-tagged adults is likely not as high as the manually scored dataset.
-
-For these analyses, we should collapse behavioral scores in the manual dataset across individuals in cases when the automated pipeline would not be able to separate individuals that performed the same behavior, whether concurrently or sequentially. The behavioral events for which we expect this to happen are when more than one individual is assigned the behavioral state "INSC" or "inside container". ABISSMAL currently uses the presence of a video recording plus the absence of detections by other movement sensors to infer whether one or more birds was inside of the nest container. Currently, the ABISSMAL functions cannot discriminate whether one bird or more than one bird was inside of the container, nor the individual identity of the bird(s) inside of the container.
-
-All other behaviors scored manually and by ABISSMAL are behaviors that can only be performed by one individual at a time (sequentially), rather than more than one individual concurrently. Perching, entering, and exiting the nest container can only be performed by one individual at a time, given that only one individual fits in the nest container entrance.
-
-Proceed by collapsing the INSC scores in the manual dataset to a single event across individuals. Collapse these scores across individuals even if the timestamps of the INSC events do not fully overlap, since this is a very coarse-grained analysis.
-
-```{r}
-
-glimpse(manual_scoring_nm)
-
-# First, are there video recording events with more than one INSC score across subjects?
-# Yes, looks good
-manual_scoring_nm %>% 
-  dplyr::filter(Behavior == "INSC") %>% 
-  group_by(unmasked_video_file) %>% 
-  dplyr::summarise(
-    n_subjects = length(Subject),
-    n_INSC = n()
-  ) %>% 
-  print(n = nrow(.))
-
-# Retain a single row for INSC scores per unique video recording event
-manual_scoring_nm_coll <- manual_scoring_nm %>%
-  dplyr::filter(Behavior == "INSC") %>% 
-  distinct(unmasked_video_file, Behavior) %>%
-  # Add back the rows for all other behavioral scores
-  bind_rows(
-    manual_scoring_nm %>%
-      dplyr::filter(Behavior != "INSC")
-  ) %>% 
-  arrange(unmasked_video_file)
-
-glimpse(manual_scoring_nm_coll)
-
-# Should have dropped rows after this operation, looks good
-nrow(manual_scoring_nm) - nrow(manual_scoring_nm_coll)
-
-```
-
 Use the unmasked video file names to get the start timestamp of the post-movement video in each unique recording event in the spreadsheet of video recording events recorded by ABISSMAL. In this metadata spreadsheet for the video recordings the column timestamp_ms that holds the time when the camera detected motion and started recording video. Use these timestamps along with the durations of the pre- and post-movement videos from the aggregated BORIS manual scoring spreadsheet to obtain the start and end timestamps of each unique recording event (the pre- and post-movement videos together).
 ```{r}
 
@@ -319,10 +276,10 @@ Here, iterate over different thresholds and run all subsequent ABISSMAL function
 preprocess_detections(sensor = "Video", timestamps_col_nm = "timestamp_ms", group_col_nm = NULL, pixel_col_nm = "total_pixels_motionTrigger", mode = NULL, thin_threshold = NULL, pixel_threshold = 1000, drop_tag = NULL, path = path, data_dir = "raw_combined", out_dir = "processed", tz = "", POSIXct_format = "%Y-%m-%d %H:%M:%OS")
 
 # Temporal thresholds in seconds for detect_perching_events(), RFID and IRBB data
-th_1 <- c(2, 3, 4) # Threshold values of 0.1 and 0.2 yielded perching events for RFID and IRBB. A value of 1 second did not yield perching events for the RFID data, so I dropped this too
+th_1 <- c(2, 3, 4) # Threshold values of 0.1 and 0.2 yielded no perching events for RFID and IRBB. A value of 1 second did not yield perching events for the RFID data, so I dropped this too
 
 # Temporal thresholds in seconds for preprocess_detections(), RFID and IRBB data
-th_2 <- c(2, 3, 4) # Threshold values of 0.1 and 0.2 yielded no clusters of detections that should be filtered. A value of 1 second did not yield clusters of detections that should be filtered for the RFID data, so I dropped this too
+th_2 <- c(0, 2, 3, 4) # Threshold values of 0.1 and 0.2 yielded no clusters of detections that should be filtered. A value of 1 second did not yield clusters of detections that should be filtered for the RFID data, so I dropped this too
 
 # Temporal thresholds in seconds for detect_clusters(), data across all 3 sensor types 
 th_3 <- c(0.1, 0.2, 1, 2, 4)
@@ -333,9 +290,9 @@ th_3 <- c(0.1, 0.2, 1, 2, 4)
 buf <- 2
 
 # Testing
-# x <- 1
-# y <- 1
-# z <- 1
+x <- 1
+y <- 1
+z <- 4
 
 # Iterate over all combinations of the temporal thresholds for detect_perching_events(), preprocess_detections(), and detect_clusters()
 # The spreadsheets written by these 3 functions will be overwritten in the subsequent iteration, so make sure to change the name of the output of score_clusters() per iteration to facilitate downstream comparisons
@@ -353,26 +310,36 @@ system.time(
         
         detect_perching_events(file_nm = "combined_raw_data_IRBB.csv", threshold = th_1[x], run_length = 2, sensor_id_col_nm = "sensor_id", timestamps_col_nm = "timestamp_ms", PIT_tag_col_nm = NULL, rfid_label = NULL, outer_irbb_label = "Outer Beam Breaker", inner_irbb_label = "Inner Beam Breaker", general_metadata_cols = c("chamber_id", "sensor_id"), path = path, data_dir = "raw_combined", out_dir = "processed", out_file_prefix = "perching_events", tz = "", POSIXct_format = "%Y-%m-%d %H:%M:%OS")
         
-        # Pre-processing raw data: Pre-process the RFID, beam breaker, and video data for the indexed detections per sensor. Iterate over different temporal thresholds used to remove beam breaker and RFID detections that were very close together.
+        # Pre-process RFID and IRBB and integrate from the pre-processed files if th2 is greater than 0, otherwise use the raw combined data as the input for integration and scoring
+        if(th_2[y] > 0){
+          
+          # Pre-processing raw data: Pre-process the RFID, beam breaker, and video data for the indexed detections per sensor. Iterate over different temporal thresholds used to remove beam breaker and RFID detections that were very close together.
         
         preprocess_detections(sensor = "IRBB", timestamps_col_nm = "timestamp_ms", group_col_nm = "sensor_id", pixel_col_nm = NULL, mode = "thin", thin_threshold = th_2[y], pixel_threshold = NULL, drop_tag = NULL, path = path, data_dir = "raw_combined", out_dir = "processed", tz = "", POSIXct_format = "%Y-%m-%d %H:%M:%OS")
         
         # The PIT tag IDs specified in `drop_tag` were tags I used for testing the RFID antenna and were not used to mark birds
         preprocess_detections(sensor = "RFID", timestamps_col_nm = "timestamp_ms", group_col_nm = "PIT_tag_ID", pixel_col_nm = NULL, mode = "thin", thin_threshold = th_2[y], pixel_threshold = NULL, drop_tag = c("01-10-3F-84-FC", "01-10-16-B8-7F"), path = path, data_dir = "raw_combined", out_dir = "processed", tz = "", POSIXct_format = "%Y-%m-%d %H:%M:%OS")
+          
+          # Integrate pre-processed data: Find clusters of detections across all 3 movement sensor that represent movement events
+          
+          # Using camera_label = "Camera" again here since that's was carried through from the raw data
+          # The run length needs to be set to 1 in order to correctly detect detection clusters of length 2
+          # detect clusters for 3 sensor types
+          detect_clusters(file_nms = c("pre_processed_data_IRBB.csv", "pre_processed_data_RFID.csv", "pre_processed_data_Video.csv"), threshold = th_3[z], run_length = 1, sensor_id_col_nm = "sensor_id", timestamps_col_nm = "timestamp_ms", PIT_tag_col_nm = "PIT_tag_ID", rfid_label = "RFID", camera_label = "Camera", preproc_metadata_col_nms = c("thin_threshold_s", "pixel_threshold", "data_stage", "date_pre_processed"), general_metadata_col_nms = c("chamber_id", "year", "month", "day"), video_metadata_col_nms = c("total_pixels_motionTrigger", "video_file_name"), path = path, data_dir = "processed", out_dir = "processed", out_file_nm = "detection_clusters.csv", tz = "", POSIXct_format = "%Y-%m-%d %H:%M:%OS")
+          
+        } else {
+          
+          # detect clusters for 3 sensor types
+          detect_clusters(file_nms = c("combined_raw_data_IRBB.csv", "combined_raw_data_RFID.csv", "combined_raw_data_Video.csv"), threshold = th_3[z], run_length = 1, sensor_id_col_nm = "sensor_id", timestamps_col_nm = "timestamp_ms", PIT_tag_col_nm = "PIT_tag_ID", rfid_label = "RFID", camera_label = "Camera", preproc_metadata_col_nms = c("thin_threshold_s", "pixel_threshold", "data_stage", "date_pre_processed"), general_metadata_col_nms = c("chamber_id", "year", "month", "day"), video_metadata_col_nms = c("total_pixels_motionTrigger", "video_file_name"), path = path, data_dir = "raw_combined", out_dir = "processed", out_file_nm = "detection_clusters.csv", tz = "", POSIXct_format = "%Y-%m-%d %H:%M:%OS")
         
-        # Integrate pre-processed data: Find clusters of detections across all 3 movement sensor that represent movement events
+        }
         
-        # Using camera_label = "Camera" again here since that's was carried through from the raw data
-        # The run length needs to be set to 1 in order to correctly detect detection clusters of length 2
-        # detect clusters for 3 sensor types
-        detect_clusters(file_nms = c("pre_processed_data_IRBB.csv", "pre_processed_data_RFID.csv", "pre_processed_data_Video.csv"), threshold = th_3[z], run_length = 1, sensor_id_col_nm = "sensor_id", timestamps_col_nm = "timestamp_ms", PIT_tag_col_nm = "PIT_tag_ID", rfid_label = "RFID", camera_label = "Camera", preproc_metadata_col_nms = c("thin_threshold_s", "pixel_threshold", "data_stage", "date_pre_processed"), general_metadata_col_nms = c("chamber_id", "year", "month", "day"), video_metadata_col_nms = c("total_pixels_motionTrigger", "video_file_name"), path = path, data_dir = "processed", out_dir = "processed", out_file_nm = "detection_clusters.csv", tz = "", POSIXct_format = "%Y-%m-%d %H:%M:%OS")
-        
-        # Score detection clusters to make inferences about behavioral events associated with these movements.  `score_clusters` should be making inferences by just the first edge encountered, not all edges in a sequence, because the system is currently targeted to capturing overall patterns of activity.
-        # score detection clusters for 3 sensor types
-        
-        out_file_nm <- paste(paste("scored_detectionClusters", paste("th1", th_1[x], sep = "-"), paste("th2", th_2[y], sep = "-"), paste("th3", th_3[z], sep = "-"), sep = "_"), ".csv", sep = "")
-        
-        score_clusters(file_nm = "detection_clusters.csv", rfid_label = "RFID", camera_label = "Camera", outer_irbb_label = "Outer Beam Breaker", inner_irbb_label = "Inner Beam Breaker", video_metadata_col_nms = c("total_pixels_motionTrigger", "video_file_name"), integrate_perching = TRUE, perching_dataset = "RFID-IRBB", perching_prefix = "perching_events_", sensor_id_col_nm = "sensor_id", PIT_tag_col_nm = "PIT_tag_ID", pixel_col_nm = "total_pixels_motionTrigger", video_width = 1280, video_height = 720, integrate_preproc_video = TRUE, video_file_nm = "pre_processed_data_Video.csv", timestamps_col_nm = "timestamp_ms", path = path, data_dir = "processed", out_dir = "processed", out_file_nm = out_file_nm, tz = "", POSIXct_format = "%Y-%m-%d %H:%M:%OS")
+          # Score detection clusters to make inferences about behavioral events associated with these movements.  `score_clusters` should be making inferences by just the first edge encountered, not all edges in a sequence, because the system is currently targeted to capturing overall patterns of activity.
+          # score detection clusters for 3 sensor types
+          
+          out_file_nm <- paste(paste("scored_detectionClusters", paste("th1", th_1[x], sep = "-"), paste("th2", th_2[y], sep = "-"), paste("th3", th_3[z], sep = "-"), sep = "_"), ".csv", sep = "")
+          
+          score_clusters(file_nm = "detection_clusters.csv", rfid_label = "RFID", camera_label = "Camera", outer_irbb_label = "Outer Beam Breaker", inner_irbb_label = "Inner Beam Breaker", video_metadata_col_nms = c("total_pixels_motionTrigger", "video_file_name"), integrate_perching = TRUE, perching_dataset = "RFID-IRBB", perching_prefix = "perching_events_", sensor_id_col_nm = "sensor_id", PIT_tag_col_nm = "PIT_tag_ID", pixel_col_nm = "total_pixels_motionTrigger", video_width = 1280, video_height = 720, integrate_preproc_video = TRUE, video_file_nm = "pre_processed_data_Video.csv", timestamps_col_nm = "timestamp_ms", path = path, data_dir = "processed", out_dir = "processed", out_file_nm = out_file_nm, tz = "", POSIXct_format = "%Y-%m-%d %H:%M:%OS")
         
         # Read in the scored spreadsheet
         scored_clusters <- read.csv(file.path(path, "processed", out_file_nm))  %>% 
@@ -427,8 +394,11 @@ system.time(
 Read in spreadsheets written by score_clusters across iterations of automated movement data processing and integration by ABISSMAL, and index this data to focus on periods of time similar to the manually scored data (a buffer of two seconds before and after each unique video recording event).
 ```{r}
 
-files <- list.files(file.path(path, "processed"), pattern = "indexedscored_")
-length(files)
+# files <- list.files(file.path(path, "processed"), pattern = "indexedscored_")
+# length(files)
+
+files <- list.files(file.path(path, "processed"), pattern = "indexedscored_detectionClusters_th1-2_th2-0_th3-2.csv")
+# files
 
 # i <- 45
 combined_auto_results <- data.table::rbindlist(pblapply(1:length(files), function(i){
@@ -462,6 +432,52 @@ combined_auto_results %>%
   write.csv(file.path(path, "processed", paste("combined_indexed_automated_behavioral_inferences.csv", sep = "")), row.names = FALSE)
 
 ```
+
+
+# Step 1. Coarse-grain the manually scored dataset across individual subjects
+
+In order to compare overall patterns of activity (regardless of the specific behavioral type that was scored) between manual scoring and ABSSMAL automated inference, we need to make sure that the datasets also display a similar level of resolution of individual identity. The manually scored dataset has the finest resolution of individual identity within the video recording events, and even includes individual identity of birds that were not PIT-tagged for individual identity detection via the RFID system. The automated inferences by ABISSMAL, on the other hand, rely on the RFID system only for individual identity detection, and therefore individual identity cannot be resolved for all individuals without PIT-tags (all chicks throughout development). In addition, RFID systems can fail to detect PIT tags (which will be validated in the next script), so the resolution of individual identity of even the two PIT-tagged adults is likely not as high as the manually scored dataset.
+
+For these analyses, we should collapse behavioral scores in the manual dataset across individuals in cases when the automated pipeline would not be able to separate individuals that performed the same behavior, whether concurrently or sequentially. The behavioral events for which we expect this to happen are when more than one individual is assigned the behavioral state "INSC" or "inside container". ABISSMAL currently uses the presence of a video recording plus the absence of detections by other movement sensors to infer whether one or more birds was inside of the nest container. Currently, the ABISSMAL functions cannot discriminate whether one bird or more than one bird was inside of the container, nor the individual identity of the bird(s) inside of the container.
+
+All other behaviors scored manually and by ABISSMAL are behaviors that can only be performed by one individual at a time (sequentially), rather than more than one individual concurrently. Perching, entering, and exiting the nest container can only be performed by one individual at a time, given that only one individual fits in the nest container entrance.
+
+Proceed by collapsing the INSC scores in the manual dataset to a single event across individuals. Collapse these scores across individuals even if the timestamps of the INSC events do not fully overlap, since this is a very coarse-grained analysis. Also remove NOBR or no bird present scores, since ABISSMAL functions currently do not make inferences about whether no birds are present inside of the container.
+```{r}
+
+glimpse(manual_scoring_nm)
+
+# First, are there video recording events with more than one INSC score across subjects?
+# Yes, looks good
+manual_scoring_nm %>% 
+  dplyr::filter(Behavior == "INSC") %>% 
+  group_by(unmasked_video_file) %>% 
+  dplyr::summarise(
+    n_subjects = length(Subject),
+    n_INSC = n()
+  ) %>% 
+  print(n = nrow(.))
+
+# Retain a single row for INSC scores per unique video recording event
+manual_scoring_nm_coll <- manual_scoring_nm %>%
+  # First remove the subject information
+  dplyr::select(-c("Subject")) %>% 
+  dplyr::filter(Behavior == "INSC") %>% 
+  distinct(unmasked_video_file, Behavior) %>%
+  # Add back the rows for all other behavioral scores
+  bind_rows(
+    manual_scoring_nm %>%
+      dplyr::filter(Behavior != "INSC") %>% 
+      # Also remove all NOBR scores
+      dplyr::filter(Behavior != "NOBR") %>% 
+      dplyr::select(unmasked_video_file, Behavior)
+  ) %>% 
+  arrange(unmasked_video_file)
+
+glimpse(manual_scoring_nm_coll)
+
+```
+
 
 Plot the overall amount of activity per parameter combination while using the collapse manual scoring dataset as a baseline. Across all videos.
 ```{r}
@@ -616,7 +632,7 @@ auto_scoring_summ <- combined_auto_results_extraAssignedVids %>%
   ungroup() %>% 
   dplyr::select(-c("perching_th_s", "preprocess_th_s", "detect_th_s"))
 
-manual_scoring_nm_summ <- manual_scoring_nm %>% 
+manual_scoring_nm_summ <- manual_scoring_nm_coll %>% 
   group_by(unmasked_video_file) %>% 
   dplyr::summarise(
     n_events = n()
@@ -667,7 +683,7 @@ gg_res <- auto_scoring_summ %>%
 
 glimpse(gg_res)
 
-# TKTK automated scores are missing for video Box_03_2023_8_7_16_42_00_pre_trigger.mp4
+# TKTK automated scores are missing for one video at times
 
 # This result makes sense given the coarser-grained temporal resolution of the automated scoring 
 gg_res %>% 
@@ -691,6 +707,158 @@ gg_res %>%
   )
 
 ```
+
+Find videos for doublechecking which behavioral the automated approach is missing.
+```{r}
+
+gg_res %>% 
+  pivot_wider(id_cols = c(video_file_name, method), names_from = type, values_from = "n_events") %>%
+  dplyr::filter(manual_scoring == 2) %>% 
+  slice(1) %>% 
+  pull(video_file_name)
+
+# "Box_03_2023_7_22_06_14_17_pre_trigger.mp4"
+
+# The INSC behaviors were collapsed into a single score across subjects, looks good
+# PERC has 1.52 second duration
+manual_scoring_nm %>% 
+  dplyr::filter(unmasked_video_file == "Box_03_2023_7_22_06_14_17_pre_trigger.mp4")
+
+# INSC, then PERC
+manual_scoring_nm_coll %>% 
+  dplyr::filter(unmasked_video_file == "Box_03_2023_7_22_06_14_17_pre_trigger.mp4")
+
+# Check raw RFID and IRBB data around this video recording timestamp
+# No RFID detections on this date around 6:14
+rfid_raw <- read.csv(file.path(sensor_path, "combined_raw_data_RFID.csv"))
+glimpse(rfid_raw)
+
+# There is a detection at 6:14 by the outer beam breaker, but only a single detection, so this wouldn't have been picked up as a "long" perching event as detected by the ABISSMAL integration functions
+# Consider another filter on the perching event duration
+irbb_raw <- read.csv(file.path(sensor_path, "combined_raw_data_IRBB.csv"))
+glimpse(irbb_raw)
+
+rfid_raw %>% 
+  dplyr::filter(month == 7 & day == 22) %>% 
+  View()
+
+irbb_raw %>% 
+  dplyr::filter(month == 7 & day == 22) %>% 
+  View()
+
+
+
+gg_res %>% 
+  pivot_wider(id_cols = c(video_file_name, method), names_from = type, values_from = "n_events") %>%
+  dplyr::filter(manual_scoring == 4) %>% 
+  slice(1) %>% 
+  pull(video_file_name)
+
+# "Box_03_2023_7_5_07_49_14_pre_trigger.mp4"
+
+# INSC, ENTR, PERC, EXIT
+manual_scoring_nm %>% 
+  dplyr::filter(unmasked_video_file == "Box_03_2023_7_5_07_49_14_pre_trigger.mp4")
+manual_scoring_nm_coll %>% 
+  dplyr::filter(unmasked_video_file == "Box_03_2023_7_5_07_49_14_pre_trigger.mp4")
+
+# Currently scored as INSC only
+combined_auto_results_extraAssignedVids %>% 
+  dplyr::filter(video_file_name == "Box_03_2023_7_5_07_49_14_pre_trigger.mp4")
+
+
+# RFID detections at 7:49 began at 07:49:37.275614 
+rfid_raw %>% 
+  dplyr::filter(month == 7 & day == 5) %>% 
+  View()
+
+# IRBB detections at 7:49 began at 07:49:12.439107
+irbb_raw %>% 
+  dplyr::filter(month == 7 & day == 5) %>% 
+  View()
+
+# RFID perching events
+rfid_perch <- read.csv(file.path(path, "processed", "perching_events_RFID.csv"))
+glimpse(rfid_perch)
+
+irbb_perch <- read.csv(file.path(path, "processed", "perching_events_IRBB.csv"))
+glimpse(irbb_perch)
+
+# There is an RFID perching event detected at 7:49, so the issue is not that we're missing this information in the raw data or in the perching event detection but somehow this information is getting lost at the integration step. See below, there actually isn't an issue with integration, instead the RFID perching event is assigned to the next video recording event, and this makes sense looking at the seconds on the timestamps
+rfid_perch %>% 
+  View()
+
+scored_clusters <- read.csv(file.path(path, "processed", "scored_detectionClusters_th1-2_th2-2_th3-0.1.csv"))  %>% 
+  # Make sure that the timestamps are in the right format
+  dplyr::mutate(
+    start = as.POSIXct(format(as.POSIXct(start, tz = ""), "%Y-%m-%d %H:%M:%OS6")),
+    end = as.POSIXct(format(as.POSIXct(end, tz = ""), "%Y-%m-%d %H:%M:%OS6"))
+  )
+
+View(scored_clusters)
+
+# No perching event is detected by IRBB around 7:49, using a threshold of 2 seconds, which makes sense because these detections were spread out over about 10 seconds
+irbb_perch %>% 
+  View()
+
+# How long is the perching event identified by manual scoring? 4.12 seconds
+manual_scoring_nm %>% 
+  dplyr::filter(unmasked_video_file == "Box_03_2023_7_5_07_49_14_pre_trigger.mp4") %>% 
+  View()
+
+
+# gg_res %>% 
+#   pivot_wider(id_cols = c(video_file_name, method), names_from = type, values_from = "n_events") %>%
+#   dplyr::filter(manual_scoring == 5) %>% 
+#   slice(1) %>% 
+#   pull(video_file_name)
+
+# "Box_03_2023_8_9_08_47_32_pre_trigger.mp4"
+
+# INSC was collapsed into a single score across subjects, looks good
+# The perching event durations are really short, around 0.7 and 0.2 seconds each
+manual_scoring_nm %>% 
+  dplyr::filter(unmasked_video_file == "Box_03_2023_8_9_08_47_32_pre_trigger.mp4")
+
+# NOBR was removed, looks good
+manual_scoring_nm_coll %>% 
+  dplyr::filter(unmasked_video_file == "Box_03_2023_8_9_08_47_32_pre_trigger.mp4")
+
+# Currently scored as inside of the container, as well as an entrance!!
+combined_auto_results_extraAssignedVids %>% 
+  dplyr::filter(video_file_name == "Box_03_2023_8_9_08_47_32_pre_trigger.mp4")
+
+# One perching event detected at 08:59, but not close to 08:47
+irbb_perch %>% 
+  View()
+
+# Same for the RFID perching events
+rfid_perch %>% 
+  View()
+
+# There definitely are detections at 08:47:30 and 08:47:31, but these are not being caught by either the perching event detection or are likely being overfiltered during pre-processing
+# These timestamps occur in the gap of time immediately before the start of post-movement video recording, or during the pre-movement recording
+rfid_raw %>% 
+  dplyr::filter(month == 8 & day == 9) %>% 
+  View()
+
+# The outer beam breaker has timestamps at 08:47.27 and 08:47.30, which also coincide with RFID
+irbb_raw %>% 
+  dplyr::filter(month == 8 & day == 9) %>% 
+  View()
+
+# Next, what happens if I don't filter out any detections in RFID and IRBB pre-processing? These detections still aren't caught when integrating data across sensors (detect_clusters() ).
+
+# Next, try changing the temporal threshold for detect_clusters(). Is the run_length of 1 an inclusive minimum filter? These two detections are 1.2 seconds apart, so they should be caught using a temporal threshold of 2 seconds in detect_clusters()
+# 08:47:30.357273
+# 08:47:31.560623
+
+# Changing the temporal threshold used for detection added back these timestamps to detect an entrance event! But the perching remains impacted, so next change the threshold used for detecting perching too. Then end troubleshooting
+
+
+```
+
+
 
 Then end with a sensitivity analysis across automated processing parameter combinations at this coarse-grained scale. Use this analysis to find parameter combinations with the highest sensitivity, and use one of those combinations for the next set of analyses at a finer-grained scale.
 ```{r}
