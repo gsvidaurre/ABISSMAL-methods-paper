@@ -5,6 +5,15 @@ date: "2024-12-01"
 output: html_document
 ---
 
+Notes on 23 May 2025:
+
+- Next steps from last coding session: 
+  - Fix unit test paths and run unit tests for ABISSMAL, then push and create a pull request for issue # 478 if tests pass
+- Additional next steps:
+  - The top priority: Think through the validation analyses to include in this manuscript.
+  - Look into the issue I found with merging videos with other movement sensors - from my last coding session with the songbird team, I think I found an issue with my logic in how I was handling the unmasked videos (see notes below)
+  - Check code that uses time lags against code development updates for a related project
+
 Purpose: Perform automated integration and scoring of movement data with ABISSMAL over varying data processing and integration parameters. These datasets will be used in subsequent validation analyses in comparison to a manually scored dataset of coarse-grained behaviors as a baseline.
 
 There are a lot of different parameters that can be modified here throughout the pipeline, and things can get messy. It might make the most sense to iterate over the pre-processing and integration parameters to compare the overall activity detected between methods (and coarse-grain the manual scoring data even more to collapse behavioral scores across different subjects for a better 1:1 comparison). Then, use the pre-processing and integration parameters with the closest overall activity levels to the manually scored dataset for the more detailed validation analyses in the next script.
@@ -40,6 +49,9 @@ invisible(lapply(1:length(code), function(i){
   source(code[i])
 }))
 
+# Path to the GitHub repository, to save lightweight files necessary for analyses that should be accessible across more than one machine
+repo_path <- "~/Desktop/GitHub_repos/ABISSMAL-methods-paper"
+
 # Overall path: contains the aggregated BORIS spreadsheet in wide format across all video recording events
 path <- "~/Desktop/ABISSMAL_validation_data"
 
@@ -71,6 +83,7 @@ Read in the aggregated manual scoring spreadsheet in which each row is a unique 
 
 manual_scoring <- read.csv(file.path(path, "BORIS_ManualScoring_Aggregated_pre-processed.csv"))
 glimpse(manual_scoring)
+# View(manual_scoring)
 
 ```
 
@@ -83,7 +96,7 @@ glimpse(unmask_nms)
 ```
 
 Choose a subsample of these videos to develop the validation analysis pipeline.
-```{r}
+```{r eval = FALSE}
 
 # Randomly select 50 video recording events from the current version of the aggregated manual scoring results in wide format
 
@@ -97,21 +110,36 @@ length(unique_obs_ids)
 set.seed(seed)
 subsample <- sample(unique_obs_ids, 50, replace = FALSE)
 
-subsample
+# Write out these observation IDs as a .csv file, then read it back in below to keep using the same set of videos across computers
+data.frame(random_sample = subsample) %>% 
+  write.csv(file.path(repo_path, "randomSample_BORIS_Observations_codeDevelopment.csv"), row.names = FALSE)
+
+```
+
+Read these randomly sampled BORIS Observation IDs back into R.
+```{r}
+
+subsample <- read.csv(file.path(repo_path, "randomSample_BORIS_Observations_codeDevelopment.csv")) %>%
+  pull(random_sample)
+
+glimpse(subsample)
 
 ```
 
 Next, unmask the video file names used for manual scoring.
 ```{r}
 
+# Filter by the randomly selected subsample of BORIS Observations
 manual_scoring_ss <- manual_scoring %>% 
   dplyr::filter(Observation.id %in% subsample)
 
 dim(manual_scoring_ss)
 
 # Checking filtering, looks good
-# all(unique(manual_scoring_ss$Observation.id) %in% subsample)
-# all(subsample %in% unique(manual_scoring_ss$Observation.id))
+all(unique(manual_scoring_ss$Observation.id) %in% subsample)
+all(subsample %in% unique(manual_scoring_ss$Observation.id))
+
+# TKTK I think this is where the issue lies. Each row of the BORIS Observation file is not a unique video recording within a unique recording event. Rather, each row is a separate behavioral state within a video recording that is within a unique recording event. If any of the data processing or analyses below end up treating each row as an independent video file, then this is wrong. Consider changing this code to unmask BOTH masked video file names in the pair instead, which will likely require changes to the previous script (validation_pre-process_manualscores.Rmd). Actually, do this even if I was just using the unmasked name to extract metadata that applies to the whole unique recording event, to avoid confusion later 
 
 # Add the unmasked video file names to each observation in the manual scoring spreadsheet
 # i <- 1 # testing
@@ -125,6 +153,7 @@ manual_scoring_nm <- data.table::rbindlist(pblapply(1:nrow(manual_scoring_ss), f
   unmasked_nm <- unmask_nms %>% 
     dplyr::filter(masked_name == masked_nm) %>% 
     pull(videos)
+  # unmasked_nm
   
   # Add the unmasked name back to the manual scoring data frame
   # The unmasked name will be one of the two unique video files per unique recording event (we don't need both names for later steps)
@@ -178,47 +207,57 @@ recording_event_ts <- data.table::rbindlist(pblapply(1:length(unique_video_pats)
   # Get the start timestamp for the post-movement video of the current unique recording event
   start_post <- video_events %>% 
     dplyr::filter(grepl(unique_video_pats[i], video_file_name)) %>% 
-    pull(timestamp_ms) %>% 
+    pull(timestamp_ms) %>%
+    # The timestamp value in the timestamp_ms column represents the moment when movement was detected, or the start time of the post-movement video, and this value is repeated for each video in a pair
     unique()
   
-  # Get the duration of each video file in the given recording event
-  tmp <- manual_scoring_nm %>% 
-    dplyr::filter(grepl(unique_video_pats[i], unmasked_video_file)) %>% 
-    separate(
-      ., col = "Media.duration..s.", into = c("video_1_dur", "video_2_dur"), sep = ";", remove = FALSE
-    ) %>% 
-    dplyr::select(c("video_1_dur", "video_2_dur")) %>% 
-    distinct() %>%
-    # Convert the duration in seconds to numeric
-    dplyr::mutate(
-      video_1_dur = as.numeric(video_1_dur),
-      video_2_dur = as.numeric(video_2_dur)
-    )
-  
-  # Create the start timestamp for this unique recording event by subtracting the duration of the first video in this event from the timestamp of the post-motion video
-  start_event <- start_post - tmp$video_1_dur
-  # start_event
-  
-  # Create the end timestamp for this unique recording event by adding the duration of the second video to the start timestamp of the post-motion video
-  end_event <- start_post + tmp$video_2_dur
-  # end_event
-  
-  # Check that the duration of these timestamps yields the same duration as the sum of the media durations in the BORIS spreadsheet
-  offset <- as.numeric(end_event - start_event) - (tmp$video_1_dur + tmp$video_2_dur)
-  
-  if(offset < 0.01){
+  if(length(start_post) == 1){
     
-    return(
-      data.frame(
-        unique_recording_event_ID = unique_video_pats[i],
-        start_event = start_event,
-        end_event = end_event
+    # Get the duration of each video file in the given recording event
+    tmp <- manual_scoring_nm %>% 
+      dplyr::filter(grepl(unique_video_pats[i], unmasked_video_file)) %>% 
+      separate(
+        ., col = "Media.duration..s.", into = c("video_1_dur", "video_2_dur"), sep = ";", remove = FALSE
+      ) %>% 
+      dplyr::select(c("video_1_dur", "video_2_dur")) %>% 
+      distinct() %>%
+      # Convert the duration in seconds to numeric
+      dplyr::mutate(
+        video_1_dur = as.numeric(video_1_dur),
+        video_2_dur = as.numeric(video_2_dur)
       )
-    )
+    
+    # Create the start timestamp for this unique recording event by subtracting the duration of the first video in this event from the start timestamp of the post-motion video
+    start_event <- start_post - tmp$video_1_dur
+    # start_event
+    
+    # Create the end timestamp for this unique recording event by adding the duration of the second video to the start timestamp of the post-motion video
+    end_event <- start_post + tmp$video_2_dur
+    # end_event
+    
+    # Check that the duration of these timestamps yields the same duration as the sum of the media durations in the BORIS spreadsheet
+    offset <- as.numeric(end_event - start_event) - (tmp$video_1_dur + tmp$video_2_dur)
+    
+    if(offset < 0.01){
+      
+      return(
+        data.frame(
+          unique_recording_event_ID = unique_video_pats[i],
+          start_event = start_event,
+          end_event = end_event,
+          duration_event = end_event - start_event
+        )
+      )
+      
+    } else {
+      
+      stop("The video durations do not line up")
+      
+    }
     
   } else {
     
-    stop("The video durations do not line up")
+    stop("More than one timestamp was returned for the start of the post-movement video, which is not the expected behavior")
     
   }
   
@@ -228,7 +267,7 @@ recording_event_ts <- data.table::rbindlist(pblapply(1:length(unique_video_pats)
 glimpse(recording_event_ts)
 # View(recording_event_ts)
 
-# The same number of rows should be here compared to the number of videos in the subsample
+# The number of rows here represents the number of unique recording events and therefore should be the same number as the subsample of BORIS observations, looks good
 nrow(recording_event_ts) == length(subsample)
 
 ```
@@ -465,7 +504,7 @@ combined_auto_results %>%
 
 In order to compare overall patterns of activity (regardless of the specific behavioral type that was scored) between manual scoring and ABSSMAL automated inference, we need to make sure that the datasets also display a similar level of resolution of individual identity. The manually scored dataset has the finest resolution of individual identity within the video recording events, and even includes individual identity of birds that were not PIT-tagged for individual identity detection via the RFID system. The automated inferences by ABISSMAL, on the other hand, rely on the RFID system only for individual identity detection, and therefore individual identity cannot be resolved for all individuals without PIT-tags (all chicks throughout development). In addition, RFID systems can fail to detect PIT tags (which will be validated in the next script), so the resolution of individual identity of even the two PIT-tagged adults is likely not as high as the manually scored dataset.
 
-For these analyses, we should collapse behavioral scores in the manual dataset across individuals in cases when the automated pipeline would not be able to separate individuals that performed the same behavior, whether concurrently or sequentially. The behavioral events for which we expect this to happen are when more than one individual is assigned the behavioral state "INSC" or "inside container". ABISSMAL currently uses the presence of a video recording plus the absence of detections by other movement sensors to infer whether one or more birds was inside of the nest container. Currently, the ABISSMAL functions cannot discriminate whether one bird or more than one bird was inside of the container, nor the individual identity of the bird(s) inside of the container.
+For these analyses, we should collapse behavioral scores in the manual dataset across individuals in cases when the automated pipeline would not be able to separate individuals that performed the same behavior, whether concurrently or sequentially. The behavioral events for which we expect behaviors to occur concurrently are when more than one individual is assigned the behavioral state "INSC" or "inside container". ABISSMAL currently uses the presence of a video recording plus the absence of detections by other movement sensors to infer whether one or more birds was inside of the nest container. Currently, the ABISSMAL functions cannot discriminate whether one bird or more than one bird was inside of the container, nor the individual identity of the bird(s) inside of the container.
 
 All other behaviors scored manually and by ABISSMAL are behaviors that can only be performed by one individual at a time (sequentially), rather than more than one individual concurrently. Perching, entering, and exiting the nest container can only be performed by one individual at a time, given that only one individual fits in the nest container entrance.
 
@@ -506,7 +545,7 @@ glimpse(manual_scoring_nm_coll)
 ```
 
 
-Plot the overall amount of activity per parameter combination while using the collapse manual scoring dataset as a baseline. Across all videos.
+Plot the overall amount of activity per parameter combination while using the collapsed manual scoring dataset as a baseline. Across all videos.
 ```{r}
 
 glimpse(manual_scoring_nm_coll)
@@ -716,12 +755,12 @@ glimpse(gg_res)
 # This result makes sense given the coarser-grained temporal resolution of the automated scoring 
 gg_res_wide <- gg_res %>% 
   pivot_wider(id_cols = c(video_file_name, method), names_from = type, values_from = "n_events")
-  # View()
-  # glimpse()
-  # dplyr::arrange(automated_inference, manual_scoring) %>%
+# View()
+# glimpse()
+# dplyr::arrange(automated_inference, manual_scoring) %>%
 
 glimpse(gg_res_wide)
-  
+
 gg_res_wide %>% 
   ggplot(aes(x = manual_scoring, y = automated_inference)) +
   facet_wrap(~ method) +
