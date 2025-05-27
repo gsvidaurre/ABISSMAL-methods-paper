@@ -144,6 +144,8 @@ dim(manual_scoring_nm)
 
 ```
 
+TKTK Need to check the analyses below very carefully: given what we found with other manually scored videos, the analyses below should not be assuming that observations can be mapped onto unique videos with a pair, unless we match timestamps within an observation to timestamps within the duration of unique videos within a pair
+
 Use the unmasked video file names to get the start timestamp of the post-movement video in each unique recording event in the spreadsheet of video recording events recorded by ABISSMAL. In this metadata spreadsheet for the video recordings the column timestamp_ms that holds the time when the camera detected motion and started recording video. Use these timestamps along with the durations of the pre- and post-movement videos from the aggregated BORIS manual scoring spreadsheet to obtain the start and end timestamps of each unique recording event (the pre- and post-movement videos together).
 ```{r}
 
