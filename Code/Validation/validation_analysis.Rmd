@@ -1,7 +1,7 @@
 ---
 title: "Video validation analysis"
 author: "Grace Smith-Vidaurre"
-date: "2024-12-01"
+date: "`r format(Sys.time(), '%d %B, %Y')`"
 output: html_document
 ---
 
@@ -13,13 +13,14 @@ Finally, the validation analysis will be planned out and run with a random subsa
 
 TKTK check true and false negative calculations throughout.
 
-```{r}
+```{r setup, include = FALSE}
 
-knitr::opts_knit$set(eval = TRUE, echo = TRUE)
+knitr::opts_chunk$set(echo = TRUE, eval = TRUE, warning = FALSE, messsage = FALSE)
 
 ```
 
-```{r package and paths, warning = FALSE, message = FALSE}
+Load packages and set paths.
+```{r package and paths}
 
 # Clean the global environment
 rm(list = ls())
@@ -1783,129 +1784,5 @@ data.frame(
 
 ```
 
-8. TIMING AND DURATION OF BEHAVIORS.
-
-For each behavioral event scored between methods, how well do the timestamps align? This analysis will depend on finding an "optimal" set of data processing and integration parameters for the automated scoring using the comparisons above to the manually scored baseline.  Alternatively, the analysis could be done in a way that facilitates comparisons across these parameters, but this could get messy.
-
-What I want to know is: when a given behavioral event was identified by both methods, when did this event begin and end, and how do these timestamps compare between methods?
-
-TKTK consider updating `score_clusters` to assign the end timestamp of INSC events as the end of the video recording event. Currently the end timestamp is the same as the start, and we need the true video recording event duration to do this (which is currently hard to access but in this analysis can be pulled from BORIS). This needs to be done in a later version of the ABISSMAL functions.
-```{r}
-
-# Iterate over all the unique videos included in the automated and manual scoring tables
-unique_videos <- unique(manual_scoring_nm$unmasked_video_file)
-unique_videos
-
-glimpse(auto_table)
-glimpse(manual_table)
-
-behavior_labels <- c("PERC", "ENTR", "EXIT", "INSC")
-
-# i <- 2
-# n <- 4
-
-temporal_validtn <- data.table::rbindlist(pblapply(1:length(unique_videos), function(i){
-  
-  # Get unique behavioral scores for the given unique recording event from summarized tables of both scoring methods
-  auto_scores <- unique(auto_table[grep(unique_videos[i], dimnames(auto_table)[[1]]), ])
-  auto_scores <- auto_scores[!is.na(auto_scores)]
-  
-  manual_scores <- unique(manual_table[grep(unique_videos[i], dimnames(manual_table)[[1]]), ])
-  manual_scores <- manual_scores[!is.na(manual_scores)]
-  
-  # auto_scores
-  # manual_scores
-  
-  # Iterate over the activity labels to determine whether the same behavior was scored by both methods within this video recording event time slot
-  tmp_res <- data.table::rbindlist(lapply(1:length(behavior_labels), function(n){
-    
-    # Convert scores to Boolean using the activity labels
-    auto_a <- ifelse(any(behavior_labels[n] %in% auto_scores), TRUE, FALSE)
-    manual_a <- ifelse(any(behavior_labels[n] %in% manual_scores), TRUE, FALSE)
-    
-    # If the given behavior was scored by both methods, then find the start and the end timestamps of the behavioral state identified by both methods
-    if(auto_a & manual_a){
-      
-      # Account for multiple behavioral events of the given type in each dataset for the given video, this may be possible (especially for the manually scored dataset). Currently, this analysis will only compare the very first exemplar of the given behavior when multiple are present for the given video recording event (for instance, when two subjects were scored as being inside of the container for the entire duration of the video recording event)
-      
-      # Search for temporal coordinates in the automatically scored dataset
-      tmp_auto <- auto_scoring5 %>% 
-        # First search for the unique recording event in this iteration
-        dplyr::filter(grepl(unique_videos[i], assigned_recording_event)) %>% 
-        # Then search for the behavioral label that matches the current iteration
-        dplyr::filter(comb_behav_inf == behavior_labels[n]) %>% 
-        slice(1)
-      
-      # Search for temporal coordinates in the manually scored dataset
-      tmp_manual <- manual_scoring_nm %>% 
-        # First search for the unique recording event in this iteration
-        dplyr::filter(grepl(unique_videos[i], unmasked_video_file)) %>% 
-        # Then search for the behavioral label that matches the current iteration
-        dplyr::filter(Behavior == behavior_labels[n]) %>% 
-        slice(1)
-      
-      # If the current behavior was INSC, then update the end timestamp automatically assigned by ABISSMAL to instead be the end of the unique recording event
-      # Pull the duration of the given recording event from the manually scored dataset (BORIS returns this information automatically)
-      if(behavior_labels[n] == "INSC"){
-        
-        # Get the complete recording event duration in seconds
-        recording_event_dur <- sum(as.numeric(strsplit(tmp_manual$Media.duration..s., split = ";")[[1]]))
-        
-        # Add the recording event duration to the automated start timestamp
-        tmp_auto$end <- tmp_auto$start + recording_event_dur
-        
-      }
-      
-      # Get a POSIX format timestamp for the manually scored videos using the video recording file name (which indicates the timestamp at which video recording started)
-      timestamp <- gsub("Box_03_|pre-trigger.mp4|pre_trigger.mp4", "", unique_videos[i])
-      timestamp <- strsplit(timestamp, split = "_")[[1]]
-      timestamp <- paste(paste(timestamp[1:3], collapse = "-"), paste(timestamp[4:length(timestamp)], collapse = ":"), sep = " ")
-      timestamp <- as.POSIXct(format(as.POSIXct(timestamp, tz = ""), "%Y-%m-%d %H:%M:%OS6"))
-      timestamp
-      
-      # Then add the start and the end timestamps in seconds from BORIS to this overall timestamp to get complete start and end timestamps that can be compared to the automated data
-      manual_start <- timestamp + tmp_manual$`Start..s.`
-      manual_end <- timestamp + tmp_manual$`Stop..s.`
-      
-      return(
-        data.frame(
-          unique_video_recording_event = unique_videos[i],
-          behavior_label = behavior_labels[n],
-          auto_start = tmp_auto %>% 
-            pull(start),
-          auto_end = tmp_auto %>% 
-            pull(end),
-          manual_start = manual_start,
-          manual_end = manual_end
-        ) %>% 
-          dplyr::mutate(
-            auto_duration = auto_end - auto_start,
-            manual_duration = manual_end - manual_start
-          )
-      )
-      
-    }
-    
-  }))
-  
-}))
-
-
-glimpse(temporal_validtn)
-View(temporal_validtn)
-
-temporal_validtn %>% 
-  dplyr::mutate(
-    start_diff = manual_start - auto_start,
-    end_diff = manual_end - auto_end,
-    dur_diff = manual_duration - auto_duration
-  ) %>% 
-  dplyr::summarise(
-    mean_start_diff = mean(start_diff),
-    mean_end_diff = mean(end_diff),
-    mean_dur_diff = mean(dur_diff)
-  )
-
-```
 
 Once the pipeline above is developed, then run the full validation analysis pipeline with all 4045 video recording events

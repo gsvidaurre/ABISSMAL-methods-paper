@@ -1,12 +1,20 @@
 ---
 title: "Pre-process manual scoring data"
+author: Grace Smith-Vidaurre
+date: "`r format(Sys.time(), '%d %B, %Y')`"
 output: html_document
-date: "2024-12-04"
 ---
 
-Purpose: Pre-process the spreadsheet containing aggregated manual scoring results from all the videos we're using for validation. This pre-processing will include fixing typos, and checking which videos needed to be rescored for aggregated export (previously we had exported in tabular format from BORIS).
+Purpose: In this script, we pre-processed the spreadsheet containing aggregated BORIS manual video scoring results from all the video recording events used for validation analyses. This pre-processing included fixing typos and checking which videos needed to be rescored for aggregated export. Previously, we had exported video scoring results in tabular format from BORIS before realizing that aggregated export was the only way to uniquely associate behavioral scores with their respective video recording events. A few video recordings events had to be rescored to facilitate aggregated export of results from BORIS.
 
-```{r package and paths, warning = FALSE, message = FALSE}
+```{r setup, include = FALSE}
+
+knitr::opts_chunk$set(echo = TRUE, eval = TRUE, warning = FALSE, messsage = FALSE)
+
+```
+
+Load packages and set paths.
+```{r package and paths}
 
 # Clean the global environment
 rm(list = ls())
@@ -122,7 +130,7 @@ manual_scoring2 <- manual_scoring %>%
   )
 
 glimpse(manual_scoring2)
-View(manual_scoring2)
+# View(manual_scoring2)
 
 # There should be no NAs in the new ID column, looks good
 which(is.na(manual_scoring2$masked_video_recording_event_ID))
