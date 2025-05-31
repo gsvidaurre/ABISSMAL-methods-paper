@@ -5,9 +5,19 @@ date: "`r format(Sys.time(), '%d %B, %Y')`"
 output: html_document
 ---
 
-Purpose: Perform a validation analysis of automatically scored behaviors (e.g. behavioral inferences) obtained by ABISSMAL. The computational analyses available in ABISSMAL facilitate integrating data across movement sensors to derive coarse-grained behavioral inferences. Here, we will validate those behavioral inferences for a subsample of the full set of videos used in the methods manuscript, using a baseline dataset obtained by manual video scoring to obtain coarse-grained behavioral states for adult birds and juveniles. The current plan for this validation analysis includes 1) assessing whether the automated and manual scoring return similar levels of overall activity per unique recording event, 2) whether the automated and manual scoring return similar levels of overall activity per behavioral state in each unique recording event, 3) the degree to which the timestamps for these automated and manual scores agree with one another (this will be a bit tricky given that some of the movement sensors will detect movement before the videos), 4) we can also iterate over parameter combinations for the automated scoring to ask how these decisions influence ageement with the manual dataset.
+*Purpose*: Perform validation analyses of the coarse-grained behavioral inferences that can be obtained by ABISSMAL. Across these validation analyses, we selected a single set of parameters used in computational analyses available through ABISSMAL to integrate data across movement sensors, and used that dataset to represent automatically scored behavioral inferences. We used the subsample of video recording events in which behavioral states that were manually scored by a single observer for adult birds and juveniles as a baseline dataset for the following validation analyses. These validation analyses included:
 
-The manually scored data needs to be concatenated and checked prior to running the final validation analysis. Also, Summer noticed some video recording events had videos switched in order, so we have to pre-process the manually scored dataset to fix these issues for the videos she caught that had this issue.
+1. *Overall activity detection*: First, how well does the integration of 3 movement sensors capture whether birds are inside of the container or not? Can we generally use the automated scores to infer that sensor activity was due to the birds or not? For this analysis, perform integration of data from the 3 sensors for all days of data collection, and then index the scored activities using the timestamps of the manually scored video recording events with a time buffer around them. 
+
+2. *Location of activity*: Next, focus on asking whether the automated and manual scores label activity by birds at the container entrance and/or inside of the container. The options here are: container entrance, inside or container, or both. For this analysis, we will use any activity score between the two methods (any of PERC, ENTR, EXIT, INSC), but ask whether the two methods agree in the location of activity. We will also focus only on manual scores of activity, and drop manual scores of no activity (NOBR).
+
+3. *RFID detection error rates*: Next, ask how reliably the RFID system that ABISSMAL depends on for individual identification captured activity by the PIT-tagged adults compared to manual scoring of subjects. In this analysis, we will focus on asking how often the PIT tags of adults were detected compared to the detection of adult subjects by manual scoring. This is an important coarse-grained validation of the RFID system prior to the finer-grained individual identity validation, because there were non-PIT-tagged birds in the nest container later in development (juveniles) and also because it is common for RFID systems to fail to detect PIT tags moving through RFID antennae.
+
+5. *Individual identity detection*: Next, ask how reliably we captured individual identity with RFID compared to the manually scored videos. In this analysis, we will rely on the RFID data for the automated detection of individuals, which will have data for the PIT-tagged adults only. Focus this analysis on asking how often each PIT tag was detected for each adult compared to the manual scoring, and then both PIT tags when manual scoring identified activity by both adults (three overall levels of individual identity detection performance).
+
+6. *Coarse-grained behavioral inferences*: Next, ask how well the integrated dataset of movement sensors scored the TYPE of activity detected. This is a finer-grained validation to ask how well behavioral scores associated with the video recording events match between the two methods. Check out my notes above that detail expectations - there will be more scores per video recording event using the manual method. The ABISSMAL functions also are currently designed to identify discrete behavioral events in a coarse-grained way, rather than longer sequences of these dicrete events. Therefore, the analyses below focus on asking how often each type of behavior was identified per unique video recording event per method, rather than comparing sequences of behavioral scores.
+
+Summer noticed some video recording events had videos switched in order, so we have to pre-process the manually scored dataset to fix these issues for the videos she caught that had this issue.
 
 Finally, the validation analysis will be planned out and run with a random subsample of the videos used for this analysis.
 
@@ -994,7 +1004,7 @@ data.frame(
 ```
 
 
-4. RFID DETECTION: Next, ask how reliably the RFID system that ABISSMAL depends on for individual identification captured activity by the PIT-tagged adults compared to manual scoring of subjects. In this analysis, we will focus on asking how often the PIT tags of adults were detected compared to the detection of adult subjects by manual scoring. This is an important coarse-grained validation of the RFID system prior to the finer-grained individual identity validation, because there were non-PIT-tagged birds in the nest container later in development (juveniles) and also because it is common for RFID systems to fail to detect PIT tags moving through RFID antennae.
+3. RFID DETECTION: Next, ask how reliably the RFID system that ABISSMAL depends on for individual identification captured activity by the PIT-tagged adults compared to manual scoring of subjects. In this analysis, we will focus on asking how often the PIT tags of adults were detected compared to the detection of adult subjects by manual scoring. This is an important coarse-grained validation of the RFID system prior to the finer-grained individual identity validation, because there were non-PIT-tagged birds in the nest container later in development (juveniles) and also because it is common for RFID systems to fail to detect PIT tags moving through RFID antennae.
 
 General approach to calculating RFID detection performance:
 
@@ -1218,7 +1228,7 @@ data.frame(
 ```
 
 
-5. INDIVIDUAL IDENTITY DETECTION: Next, ask how reliably we captured individual identity with RFID compared to the manually scored videos. In this analysis, we will rely on the RFID data for the automated detection of individuals, which will have data for the PIT-tagged adults only. Focus this analysis on asking how often each PIT tag was detected for each adult compared to the manual scoring, and then both PIT tags when manual scoring identified activity by both adults (three overall levels of individual identity detection performance).
+4. INDIVIDUAL IDENTITY DETECTION: Next, ask how reliably we captured individual identity with RFID compared to the manually scored videos. In this analysis, we will rely on the RFID data for the automated detection of individuals, which will have data for the PIT-tagged adults only. Focus this analysis on asking how often each PIT tag was detected for each adult compared to the manual scoring, and then both PIT tags when manual scoring identified activity by both adults (three overall levels of individual identity detection performance).
 
 General approach to calculating individual identity detection performance:
 
@@ -1526,7 +1536,7 @@ data.frame(
 
 ```
 
-6. BEHAVIORAL INFERENCE: Next, ask how well the integrated dataset of movement sensors scored the TYPE of activity detected. This is a finer-grained validation to ask how well behavioral scores associated with the video recording events match between the two methods. Check out my notes above that detail expectations - there will be more scores per video recording event using the manual method. The ABISSMAL functions also are currently designed to identify discrete behavioral events in a coarse-grained way, rather than longer sequences of these dicrete events. Therefore, the analyses below focus on asking how often each type of behavior was identified per unique video recording event per method, rather than comparing sequences of behavioral scores.
+5. BEHAVIORAL INFERENCE: Next, ask how well the integrated dataset of movement sensors scored the TYPE of activity detected. This is a finer-grained validation to ask how well behavioral scores associated with the video recording events match between the two methods. Check out my notes above that detail expectations - there will be more scores per video recording event using the manual method. The ABISSMAL functions also are currently designed to identify discrete behavioral events in a coarse-grained way, rather than longer sequences of these dicrete events. Therefore, the analyses below focus on asking how often each type of behavior was identified per unique video recording event per method, rather than comparing sequences of behavioral scores.
 
 For the analysis below, we want to know how often ABISSMAL and manual scoring picked up the same behavior in association with a given video recording event. Here we will compare the 4 categories of coarse-grained behaviors identified by both methods: INSC, PERC, ENTR, EXIT. We will also focus on scoring of only a single behavior at a time here.
 
@@ -1665,7 +1675,7 @@ tp_fp_tn_fn <- data.table::rbindlist(pblapply(1:length(unique_videos), function(
     # auto_n
     # manual_n
     
-    # Score true positives: both methods identitfied a type of activity
+    # Score true positives: both methods identified a type of activity
     if(auto_a & manual_a){
       
       true_positive <- 1

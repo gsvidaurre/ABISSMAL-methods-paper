@@ -14,7 +14,7 @@ Notes on 23 May 2025:
   - Look into the issue I found with merging videos with other movement sensors - from my last coding session with the songbird team, I think I found an issue with my logic in how I was handling the unmasked videos (see notes below)
   - Check code that uses time lags against code development updates for a related project
 
-Purpose: Perform automated integration and scoring of movement data with ABISSMAL over varying data processing and integration parameters. These datasets will be used in subsequent validation analyses in comparison to a manually scored dataset of coarse-grained behaviors as a baseline.
+*Purpose*: Perform automated integration and scoring of movement data with ABISSMAL over varying data processing and integration parameters. These datasets will be used in subsequent validation analyses in comparison to a manually scored dataset of coarse-grained behaviors as a baseline.
 
 There are a lot of different parameters that can be modified here throughout the pipeline, and things can get messy. It might make the most sense to iterate over the pre-processing and integration parameters to compare the overall activity detected between methods (and coarse-grain the manual scoring data even more to collapse behavioral scores across different subjects for a better 1:1 comparison). Then, use the pre-processing and integration parameters with the closest overall activity levels to the manually scored dataset for the more detailed validation analyses in the next script.
 ```{r setup, include = FALSE}
