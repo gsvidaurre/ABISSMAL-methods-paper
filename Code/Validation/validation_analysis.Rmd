@@ -327,7 +327,8 @@ The next step will be to perform automated behavioral scoring of the raw movemen
 Find RFID and beam breaker perching events. Iterate over different temporal thresholds used to label stretches of detections as perching events.
 ```{r find perching events}
 
-ths <- c(0.1, 0.2, 1, 2, 4) # temporal thresholds in seconds
+# Setting the threshold to 2 seconds only, to include detections that occurred from 0 - 2 seconds apart. No results are returned for RFID using a threshold of 1 second. I'm also using a run length of 2 to set the minimum number of detections needed to call a perching event to 3 total, which does reduce the overall number of perching events detected by both sensors.
+ths <- c(2) # temporal thresholds in seconds
 
 invisible(pblapply(1:length(ths), function(thx){
   
@@ -343,6 +344,26 @@ invisible(pblapply(1:length(ths), function(thx){
 
 ```
 
+TKTK checking perching events.
+```{r}
+
+# Check gap summary statistics before moving on
+perching_df %>%
+  pivot_longer(
+    cols = c("min_gap_s", "mean_gap_s", "max_gap_s"),
+    names_to = "type",
+    values_to = "values"
+  ) %>% 
+  group_by(PIT_tag_ID) %>% 
+  dplyr::reframe(
+    range_vals = range(values)
+  )
+
+
+```
+
+
+
 # Pre-processing raw data
 
 Pre-process the RFID, beam breaker, and video data for the indexed detections per sensor. Iterate over different temporal thresholds used to remove beam breaker and RFID detections that were very close together.
@@ -350,7 +371,8 @@ Pre-process the RFID, beam breaker, and video data for the indexed detections pe
 TKTK update code, need to either update the function below to include a prefix, or instead run all functions together per temporal threshold and save these in separate directories by threshold value.
 ```{r preprocess data}
 
-ths <- c(0.1, 0.2, 1, 2, 4) # temporal thresholds in seconds
+# Using a threshold of 1 second only here
+ths <- c(1) # temporal thresholds in seconds
 
 invisible(pblapply(1:length(ths), function(thx){
   
@@ -382,12 +404,29 @@ Find clusters of detections across all 3 movement sensor that represent movement
 # The run length needs to be set to 1 in order to correctly detect detection clusters of length 2
 detect_clusters(file_nms = c("pre_processed_data_IRBB.csv", "pre_processed_data_RFID.csv", "pre_processed_data_Video.csv"), threshold = 2, run_length = 1, sensor_id_col_nm = "sensor_id", timestamps_col_nm = "timestamp_ms", PIT_tag_col_nm = "PIT_tag_ID", rfid_label = "RFID", camera_label = "Camera", preproc_metadata_col_nms = c("thin_threshold_s", "pixel_threshold", "data_stage", "date_pre_processed"), general_metadata_col_nms = c("chamber_id", "year", "month", "day"), video_metadata_col_nms = c("total_pixels_motionTrigger", "video_file_name"), path = path, data_dir = "processed", out_dir = "processed", out_file_nm = "detection_clusters.csv", tz = "", POSIXct_format = "%Y-%m-%d %H:%M:%OS")
 
+# Check summary statistics for gaps between consecutive detections
+detectn_clusters <- read.csv(file.path(path, "processed", "detection_clusters.csv"))
+glimpse(detectn_clusters)
+
+# The maximum gap between consecutive detections should be 2 seconds, looks good
+detectn_clusters %>% 
+  pivot_longer(
+    cols = c("min_gap_s", "mean_gap_s", "max_gap_s"),
+    names_to = "type",
+    values_to = "values"
+  ) %>% 
+  # group_by(PIT_tag_ID) %>% 
+  dplyr::reframe(
+    range_vals = range(values)
+  )
+
+
 ```
 
 Score detection clusters to make inferences about behavioral events associated with these movements.  `score_clusters` should be making inferences by just the first edge encountered, not all edges in a sequence, because the system is currently targeted to capturing overall patterns of activity.
 ```{r score detection clusters for 3 sensor types}
 
-score_clusters(file_nm = "detection_clusters.csv", rfid_label = "RFID", camera_label = "Camera", outer_irbb_label = "Outer Beam Breaker", inner_irbb_label = "Inner Beam Breaker", video_metadata_col_nms = c("total_pixels_motionTrigger", "video_file_name"), integrate_perching = TRUE, perching_dataset = "RFID-IRBB", perching_prefix = "perching_events_", sensor_id_col_nm = "sensor_id", PIT_tag_col_nm = "PIT_tag_ID", pixel_col_nm = "total_pixels_motionTrigger", video_width = 1280, video_height = 720, integrate_preproc_video = TRUE, video_file_nm = "pre_processed_data_Video.csv", timestamps_col_nm = "timestamp_ms", path = path, data_dir = "processed", out_dir = "processed", out_file_nm = "scored_detectionClusters.csv", tz = "", POSIXct_format = "%Y-%m-%d %H:%M:%OS")
+score_clusters(file_nm = "detection_clusters.csv", rfid_label = "RFID", camera_label = "Camera", outer_irbb_label = "Outer Beam Breaker", inner_irbb_label = "Inner Beam Breaker", video_metadata_col_nms = c("total_pixels_motionTrigger", "video_file_name"), integrate_perching = TRUE, perching_dataset = "RFID-IRBB", perching_prefix = "perching_events_th-2_", perching_threshold = 2, sensor_id_col_nm = "sensor_id", PIT_tag_col_nm = "PIT_tag_ID", pixel_col_nm = "total_pixels_motionTrigger", video_width = 1280, video_height = 720, integrate_preproc_video = TRUE, video_file_nm = "pre_processed_data_Video.csv", timestamps_col_nm = "timestamp_ms", path = path, data_dir = "processed", out_dir = "processed", out_file_nm = "scored_detectionClusters.csv", tz = "", POSIXct_format = "%Y-%m-%d %H:%M:%OS")
 
 ```
 
@@ -641,7 +680,7 @@ table(auto_scoring2$inferences)
 # NA-inside_container-NA              ### this is inside_container or INSC
 #                             44 
 
-# Will need to add back perching events for the full dataset (currently that inference is NA here)
+# Will need to add back perching events for the full dataset (currently that inference is NA here). TKTK see code above, perching events were added already above
 auto_scoring2 <- auto_scoring2 %>% 
   dplyr::mutate(
     inferences = ifelse(inferences == "entrance-container_entrance-NA", "ENTR", inferences),
@@ -688,8 +727,8 @@ auto_table <- auto_scoring2 %>%
 
 # View(auto_scoring2)
 
-View(auto_table)
-View(manual_table)
+# View(auto_table)
+# View(manual_table)
 
 ```
 
@@ -1001,6 +1040,11 @@ data.frame(
   specificity = specificity_loc
 )
 
+#            locations precision sensitivity specificity
+# 1 container_entrance      87.5       50.00       50.00
+# 2   inside_container     100.0       88.00       88.00
+# 3               both      50.0        7.14        7.14
+
 ```
 
 
@@ -1096,8 +1140,8 @@ auto_table <- auto_scoring4 %>%
   pivot_wider(names_from = assigned_recording_event, values_from = Subject_binary) %>% 
   t()
 
-View(auto_table)
-View(manual_table)
+# View(auto_table)
+# View(manual_table)
 
 ```
 
@@ -1225,6 +1269,9 @@ data.frame(
   specificity = specificity(X = tp_fp_tn_fn_sum, tns_col_nm = "tps", fps_col_nm = "fns")
 )
 
+#   precision sensitivity specificity
+# 1        50       30.77       30.77
+
 ```
 
 
@@ -1328,8 +1375,8 @@ auto_table <- auto_scoring4 %>%
   pivot_wider(names_from = assigned_recording_event, values_from = Subject_mod) %>% 
   t()
 
-View(auto_table)
-View(manual_table)
+# View(auto_table)
+# View(manual_table)
 
 ```
 
@@ -1534,6 +1581,11 @@ data.frame(
   specificity = specificity_ind
 )
 
+#   adult_labels precision sensitivity specificity
+# 1       Female         0           0           0
+# 2         Male       100          50          50
+# 3         Both         0           0           0
+
 ```
 
 5. BEHAVIORAL INFERENCE: Next, ask how well the integrated dataset of movement sensors scored the TYPE of activity detected. This is a finer-grained validation to ask how well behavioral scores associated with the video recording events match between the two methods. Check out my notes above that detail expectations - there will be more scores per video recording event using the manual method. The ABISSMAL functions also are currently designed to identify discrete behavioral events in a coarse-grained way, rather than longer sequences of these dicrete events. Therefore, the analyses below focus on asking how often each type of behavior was identified per unique video recording event per method, rather than comparing sequences of behavioral scores.
@@ -1560,7 +1612,7 @@ auto_scoring5 <- auto_scoring_extraAssignedVids %>%
   )
 
 glimpse(auto_scoring5)
-View(auto_scoring5)
+# View(auto_scoring5)
 
 table(auto_scoring5$inferences)
 
@@ -1622,8 +1674,8 @@ auto_table <- auto_scoring5 %>%
 
 # View(auto_scoring2)
 
-View(auto_table)
-View(manual_table)
+# View(auto_table)
+# View(manual_table)
 
 ```
 
@@ -1791,6 +1843,13 @@ data.frame(
   sensitivity = sensitivity_ind,
   specificity = specificity_ind
 )
+
+# Note that the subsample of videos used for code development did not contain perching events
+#   behavior_label precision sensitivity specificity
+# 1           PERC      0.00        0.00        0.00
+# 2           ENTR     42.86       60.00       60.00
+# 3           EXIT     25.00       16.67       16.67
+# 4           INSC     97.78       88.00       88.00
 
 ```
 
