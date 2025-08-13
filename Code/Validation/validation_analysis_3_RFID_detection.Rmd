@@ -1,0 +1,282 @@
+---
+title: "Video validation analysis 3: RFID detection error rates"
+author: "Grace Smith-Vidaurre"
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+output: html_document
+---
+
+*Purpose of RFID detection error rate validation*: Ask how reliably the RFID system that ABISSMAL depends on for individual identification captured activity by the PIT-tagged adults compared to manual scoring of subjects. In this analysis, we will focus on asking how often the PIT tags of adults were detected compared to the detection of adult subjects by manual scoring. This is an important coarse-grained validation of the RFID system prior to the finer-grained individual identity validation, because there were non-PIT-tagged birds in the nest container later in development (juveniles) and also because it is common for RFID systems to fail to detect PIT tags moving through RFID antennae.
+
+```{r setup, include = FALSE}
+
+knitr::opts_chunk$set(echo = TRUE, eval = TRUE, warning = FALSE, messsage = FALSE)
+
+```
+
+Load packages and set paths.
+```{r package and paths}
+
+# Clean the global environment
+rm(list = ls())
+
+X <- c("tidyverse", "pbapply", "data.table", "tidyquant")
+
+# Install the packages in X if not already installed
+is_installed <- function(p) is.element(p, installed.packages()[,1])
+
+invisible(lapply(1:length(X), function(x){
+  if(!is_installed(X[x])){
+    install.packages(X[x], repos = "http://lib.stat.cmu.edu/R/CRAN")
+  }
+}))
+
+invisible(lapply(X, library, character.only = TRUE))
+
+# Overall path: contains the aggregated BORIS spreadsheet in wide format across all video recording events
+path <- "~/Desktop/ABISSMAL_validation_data"
+
+# Path to the combined raw movement sensor data
+sensor_path <- file.path(path, "raw_combined")
+
+# Initialize a folder where we will save the indexed raw data for the validation analyses
+indexed_dir <- "indexed_labeled_data"
+indexed_path <- file.path(path, indexed_dir)
+
+# Create this folder if it doesn't already exist
+if(!dir.exists(indexed_path)){
+  dir.create(indexed_path)
+}
+
+# Initialize the GitHub repo path, which holds a .csv file of a subsample of video file names used for code development
+git_path <- "~/Desktop/GitHub_repos/ABISSMAL-methods-paper/Code"
+
+seed <- 888
+
+```
+
+
+3. RFID DETECTION: Next, ask how reliably the RFID system that ABISSMAL depends on for individual identification captured activity by the PIT-tagged adults compared to manual scoring of subjects. In this analysis, we will focus on asking how often the PIT tags of adults were detected compared to the detection of adult subjects by manual scoring. This is an important coarse-grained validation of the RFID system prior to the finer-grained individual identity validation, because there were non-PIT-tagged birds in the nest container later in development (juveniles) and also because it is common for RFID systems to fail to detect PIT tags moving through RFID antennae.
+
+General approach to calculating RFID detection performance:
+
+**True positive** = Activity by adults was detected by both ABISSMAL (PIT tag detected) and manual scoring (adult subjects detected).
+
+**False negative** = ABISSMAL detected no PIT tag but adult subjects were detected by manual scoring.
+
+**False positive** = ABISSMAL detected a PIT tag but no adult subjects were detected by manual scoring.
+
+**True negative** = Neither ABISSMAL nor manual scoring detected activity by adult birds (no PIT tags detected by ABISSMAL, and no adult subjects detected by manual scoring).
+
+Assess the precision, sensitivity, and specificity of the RFID module used by ABISSMAL.
+
+First we need to condense the automated scoring and the manual scoring data frames to have a single row per video while retaining information about adult activity (PIT tags in the ABISSMAL data, and adult subjects in the manually scored data).
+```{r}
+
+# View(manual_scoring_nm)
+names(manual_scoring_nm)
+
+
+########### Convert the subject labels per dataset
+
+# The subject names for adults in the manually scored data are "Female", "Male", "Unknown_Adult"
+# Subject names for no detections of adults will be all other subject labels: "Juveniles_Pooled", "Juvenile", "No_Birds", and "Bird_of_Unknown_Age" (to be conservative, since such subjects could have been juvenile)
+
+# The unique PIT tag IDs for adults in this dataset are: "01-10-3F-8F-F0" and "01-10-16-CD-1C" 
+# unique(scored_clusters$individual_initiated)
+
+# Convert the subject labels in the manually scored dataset to binary labels: Adult or No Adult
+manual_scoring_nm2 <- manual_scoring_nm %>% 
+  # Replace the subject labels to be "Adult" or "No Adult"
+  dplyr::mutate(
+    Subject_binary = ifelse(Subject %in% c("Female", "Male", "Unknown_Adult"), "Adult", Subject),
+    Subject_binary = ifelse(Subject_binary %in% c("Juveniles_Pooled", "Juvenile", "No_Birds", "Bird_of_Unknown_Age"), "No Adult", Subject_binary)
+  )
+
+# Looks good, only 2 values remain as expected 
+unique(manual_scoring_nm2$Subject_binary)
+
+
+# Get one row of PIT tag IDs per video recording event
+glimpse(auto_scoring2)
+
+# Create a new column that condenses PIT tag IDs from inferences about which individual started a movement event, which individual ended the movement event, and which individual was detected in a perching event
+auto_scoring3 <- auto_scoring2 %>% 
+  dplyr::mutate(
+    PIT_tags = paste(individual_initiated, individual_ended, perching_PIT_tag, sep = " - ")
+  )
+
+glimpse(auto_scoring3)
+unique(auto_scoring3$PIT_tags)
+
+# Convert the subject labels in the ABISSMAL scored dataset to binary labels: Adult or No Adult
+auto_scoring4 <- auto_scoring3 %>% 
+  # Replace the PIT tag labels to be "Adult" or "No Adult"
+  dplyr::mutate(
+    Subject_binary = ifelse(grepl(paste(c("01-10-3F-8F-F0", "01-10-16-CD-1C"), collapse = "|"), PIT_tags), "Adult", PIT_tags),
+    Subject_binary = ifelse(!grepl(paste(c("01-10-3F-8F-F0", "01-10-16-CD-1C"), collapse = "|"), PIT_tags), "No Adult", Subject_binary)
+  )
+
+# Looks good, only the two expected labels remain
+unique(auto_scoring4$Subject_binary)
+
+########### Convert the manual and automated scoring data frames to tables
+
+# Get one row of subject labels per video recording event
+manual_table <- manual_scoring_nm2 %>% 
+  group_by(unmasked_video_file) %>%
+  # Create a unique row identifier within videos
+  dplyr::mutate(
+    row_id = row_number()
+  ) %>% 
+  ungroup() %>% 
+  # View()
+  dplyr::select(row_id, unmasked_video_file, Subject_binary) %>% 
+  pivot_wider(names_from = unmasked_video_file, values_from = Subject_binary) %>% 
+  t()
+
+
+auto_table <- auto_scoring4 %>% 
+  group_by(assigned_recording_event) %>%
+  # Create a unique row identifier within videos
+  dplyr::mutate(
+    row_id = row_number()
+  ) %>% 
+  ungroup() %>% 
+  # View()
+  dplyr::select(row_id, assigned_recording_event, Subject_binary) %>% 
+  pivot_wider(names_from = assigned_recording_event, values_from = Subject_binary) %>% 
+  t()
+
+# View(auto_table)
+# View(manual_table)
+
+```
+
+In this analysis, we need to remove video recording events that only included activity scored inside of the container, for a fair validation of the RFID system. The RFID antennae is mounted in the container entrance, so it can only detect activity by individuals at this location. We included videos that had activity scored for birds of an unknown age, but did not consider this subject label an adult detection to be conservative.
+```{r}
+
+# Iterate over all the unique videos included in the automated and manual scoring tables to find true positives and false negatives
+# Remove video recording events that had INSC scores only
+# unique(manual_scoring_nm$Behavior)
+
+unique_videos <- manual_scoring_nm %>%
+  # This filter will drop any rows with the INSC label
+  # But since there are multiple rows per unique recording event, video recording events that had other labels will be retained in the unique() call below
+  dplyr::filter(!grepl("INSC", Behavior)) %>% 
+  pull(unmasked_video_file) %>% 
+  unique()
+
+unique_videos
+
+glimpse(auto_table)
+glimpse(manual_table)
+
+# testing
+# i <- 10
+
+tp_fp_tn_fn <- data.table::rbindlist(pblapply(1:length(unique_videos), function(i){
+  
+  # Get unique subject labels for the given unique recording event from summarized tables of both scoring methods
+  auto_scores <- unique(auto_table[grep(unique_videos[i], dimnames(auto_table)[[1]]), ])
+  auto_scores <- auto_scores[!is.na(auto_scores)]
+  
+  manual_scores <- unique(manual_table[grep(unique_videos[i], dimnames(manual_table)[[1]]), ])
+  manual_scores <- manual_scores[!is.na(manual_scores)]
+  
+  auto_scores
+  manual_scores
+  
+  # Convert scores to Boolean using the adult activity label
+  auto_a <- ifelse(any("Adult" %in% auto_scores), TRUE, FALSE)
+  manual_a <- ifelse(any("Adult" %in% manual_scores), TRUE, FALSE)
+  
+  # Convert scores to Boolean using the no adult activity label
+  auto_n <- ifelse(any("No Adult" %in% auto_scores), TRUE, FALSE)
+  manual_n <- ifelse(any("No Adult" %in% manual_scores), TRUE, FALSE)
+  
+  # Score true positives: both methods identitfied a type of activity
+  if(auto_a & manual_a){
+    
+    true_positive <- 1
+    
+  } else {
+    
+    true_positive <- 0
+    
+  }
+  
+  # Score false positives: manual scoring identified no adult activity but ABISSMAL did
+  if(manual_n & auto_a){
+    
+    false_positive <- 1
+    
+  } else {
+    
+    false_positive <- 0
+    
+  }
+  
+  # Score true negatives: both methods identified no adult activity
+  if(auto_n & manual_n){
+    
+    true_negative <- 1
+    
+  } else {
+    
+    true_negative <- 0
+    
+  }
+  
+  # Score false negatives: manual scoring identified adult activity but ABISSMAL did not
+  if(manual_a & auto_n){
+    
+    false_negative <- 1
+    
+  } else {
+    
+    false_negative <- 0
+    
+  }
+  
+  return(
+    data.frame(
+      unique_video_recording_event = unique_videos[i],
+      true_positive = true_positive,
+      false_positive = false_positive,
+      true_negative = true_negative,
+      false_negative = false_negative
+    )
+  )
+  
+}))
+
+
+# There should be 1 row per unique video recording event retained after filtering to remove videos scored as INSC only, looks good
+glimpse(tp_fp_tn_fn)
+# View(tp_fp_tn_fn)
+
+```
+
+Calculate precision, recall, sensitivity, and specificity of the RFID module, which ABISSMAL uses to detect activity by each adult individual.
+```{r}
+
+tp_fp_tn_fn_sum <- tp_fp_tn_fn %>% 
+  dplyr::summarise(
+    tps = sum(true_positive),
+    fps = sum(false_positive),
+    tns = sum(true_negative),
+    fns = sum(false_negative)
+  )
+
+tp_fp_tn_fn_sum
+
+data.frame(
+  precision = precision(X = tp_fp_tn_fn_sum, tps_col_nm = "tps", fps_col_nm = "fps"),
+  sensitivity = sensitivity(X = tp_fp_tn_fn_sum, tps_col_nm = "tps", fns_col_nm = "fns"),
+  specificity = specificity(X = tp_fp_tn_fn_sum, tns_col_nm = "tps", fps_col_nm = "fns")
+)
+
+#   precision sensitivity specificity
+# 1        50       30.77       30.77
+
+```

@@ -1,0 +1,272 @@
+---
+title: "Video validation analysis 2: Location inference"
+author: "Grace Smith-Vidaurre"
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+output: html_document
+---
+
+*Purpose of location of activity validation*: Focus on asking whether the automated and manual scores label activity by birds at the container entrance and/or inside of the container. The options here are: container entrance, inside or container, or both. For this analysis, we will use any activity score between the two methods (any of PERC, ENTR, EXIT, INSC), but ask whether the two methods agree in the location of activity. We will also focus only on manual scores of activity, and drop manual scores of no activity (NOBR).
+
+```{r setup, include = FALSE}
+
+knitr::opts_chunk$set(echo = TRUE, eval = TRUE, warning = FALSE, messsage = FALSE)
+
+```
+
+Load packages and set paths.
+```{r package and paths}
+
+# Clean the global environment
+rm(list = ls())
+
+X <- c("tidyverse", "pbapply", "data.table", "tidyquant")
+
+# Install the packages in X if not already installed
+is_installed <- function(p) is.element(p, installed.packages()[,1])
+
+invisible(lapply(1:length(X), function(x){
+  if(!is_installed(X[x])){
+    install.packages(X[x], repos = "http://lib.stat.cmu.edu/R/CRAN")
+  }
+}))
+
+invisible(lapply(X, library, character.only = TRUE))
+
+# Overall path: contains the aggregated BORIS spreadsheet in wide format across all video recording events
+path <- "~/Desktop/ABISSMAL_validation_data"
+
+# Path to the combined raw movement sensor data
+sensor_path <- file.path(path, "raw_combined")
+
+# Initialize a folder where we will save the indexed raw data for the validation analyses
+indexed_dir <- "indexed_labeled_data"
+indexed_path <- file.path(path, indexed_dir)
+
+# Create this folder if it doesn't already exist
+if(!dir.exists(indexed_path)){
+  dir.create(indexed_path)
+}
+
+# Initialize the GitHub repo path, which holds a .csv file of a subsample of video file names used for code development
+git_path <- "~/Desktop/GitHub_repos/ABISSMAL-methods-paper/Code"
+
+seed <- 888
+
+```
+
+2. LOCATION INFERENCE: Next, focus on asking whether the automated and manual scores label activity by birds at the container entrance and/or inside of the container. The options here are: container entrance, inside or container, or both. For this analysis, we will use any activity score between the two methods (any of PERC, ENTR, EXIT, INSC), but ask whether the two methods agree in the location of activity. We will also focus only on manual scores of activity, and drop manual scores of no activity (NOBR).
+
+Generall approach to calculating detection performance:
+
+**True positive** = activity was detected at the same location(s) by both ABISSMAL and manual scoring. How often did ABISSMAL capture activity in the same location when activity at the same location was also picked up by manual scoring (any activity label, and both methods capture activity at the same location)?
+
+**False negative** = ABISSMAL does not detect activity at a given location(s) where manual scoring detects activity. 
+
+**False positive** = ABISSMAL detects activity at a given location(s), but manual scoring does not.
+
+**True negative** = Neither ABISSMAL nor manual scoring detect activity for a given location(s).
+
+Overall, we can assess both the precision (out of the positive predictions, which are truly positive) and sensitivity (or recall, what percentage of the total positives were predicted) of activity location inferences by ABISSMAL, as well as the the specificity (true negative rate, or how well the true negatives are predicted while avoiding false alarms). Note that false negatives and positives will be the same because they are defined as a mismatch in location scores between methods.
+
+We need to calculate true positives and false negatives, and then each of the performance metrics, for each of the location classes. 
+```{r}
+
+# Iterate over all the unique videos included in the automated and manual scoring tables to find true positives and false negatives
+# Also remove video recording events that had a NOBR score only
+# unique(manual_scoring_nm$Behavior)
+
+unique_videos <- manual_scoring_nm %>% 
+  dplyr::filter(!grepl("NOBR", Behavior)) %>% 
+  pull(unmasked_video_file) %>% 
+  unique()
+
+unique_videos
+
+glimpse(auto_table)
+glimpse(manual_table)
+
+# container entrance is "PERC", "ENTR", "EXIT"
+# inside of container is "INSC"
+# it is also possible to score activity at both locations
+
+# both is "PERC|ENTR|EXIT" and "INSC" 
+locations <- c("container_entrance", "inside_container", "both")
+labels <- list(
+  "container_entrance" = c("PERC", "ENTR", "EXIT"),
+  "inside_container" = c("INSC"),
+  "both" = c("PERC|ENTR|EXIT", "INSC")
+)
+
+labels
+
+# testing
+# i <- 1
+# n <- 3
+
+tp_fp_tn_fn <- data.table::rbindlist(pblapply(1:length(unique_videos), function(i){
+  
+  # Get unique behavioral scores for the given unique recording event from summarized tables of both scoring methods
+  auto_scores <- unique(auto_table[grep(unique_videos[i], dimnames(auto_table)[[1]]), ])
+  auto_scores <- auto_scores[!is.na(auto_scores)]
+  
+  manual_scores <- unique(manual_table[grep(unique_videos[i], dimnames(manual_table)[[1]]), ])
+  manual_scores <- manual_scores[!is.na(manual_scores)]
+  
+  # Iterate over locations
+  res <- data.table::rbindlist(lapply(1:length(locations), function(n){
+    
+    # Convert scores to Boolean using the labels associated with the respective location
+    if(!locations[n] %in% "both"){
+      
+      auto <- ifelse(any(labels[[locations[n]]] %in% auto_scores), TRUE, FALSE)
+      manual <- ifelse(any(labels[[locations[n]]] %in% manual_scores), TRUE, FALSE)
+      
+      # If checking for labels in both locations, then loop over the location labels for a thorough Boolean conversion
+    } else {
+      
+      tmp_labs <- labels[[locations[n]]]
+      
+      tmp_res <- data.table::rbindlist(lapply(1:length(tmp_labs), function(z){
+        
+        auto <- any(grepl(tmp_labs[z], auto_scores))
+        manual <- any(grepl(tmp_labs[z], manual_scores))
+        
+        return(
+          data.frame(
+            auto = auto,
+            manual = manual
+          )
+        )
+        
+      }))
+      
+      auto <- all(tmp_res$auto)
+      manual <- all(tmp_res$manual)
+      
+    }
+    
+    # Score true positives
+    if(auto & manual){
+      
+      true_positive <- 1
+      
+    } else {
+      
+      true_positive <- 0
+      
+    }
+    
+    # Score false positives
+    if(auto & !manual){
+      
+      false_positive <- 1
+      
+    } else {
+      
+      false_positive <- 0
+      
+    }
+    
+    # Score true negatives
+    if(!manual & !auto){
+      
+      true_negative <- 1
+      
+    } else {
+      
+      true_negative <- 0
+      
+    }
+    
+    # Score false negatives
+    if(manual & !auto){
+      
+      false_negative <- 1
+      
+    } else {
+      
+      false_negative <- 0
+      
+    }
+    
+    return(
+      data.frame(
+        unique_video_recording_event = unique_videos[i],
+        location = locations[n],
+        true_positive = true_positive,
+        false_positive = false_positive,
+        true_negative = true_negative,
+        false_negative = false_negative
+      )
+    )
+    
+  }))
+  
+  return(res)
+  
+}))
+
+# There should be 3 rows per unique video recording event, looks good
+glimpse(tp_fp_tn_fn)
+# View(tp_fp_tn_fn)
+
+```
+
+Calculate precision, recall, sensitivity, and specificity of activity detection by location.
+```{r}
+
+tp_fp_tn_fn_sum <- tp_fp_tn_fn %>% 
+  group_by(location) %>% 
+  dplyr::summarise(
+    tps = sum(true_positive),
+    fps = sum(false_positive),
+    tns = sum(true_negative),
+    fns = sum(false_negative)
+  ) %>% 
+  ungroup()
+
+tp_fp_tn_fn_sum
+
+# Precision across locations
+precision_loc <- sapply(1:length(locations), function(i){
+  
+  precision(X = tp_fp_tn_fn_sum[grep(locations[i], tp_fp_tn_fn_sum$location), ], tps_col_nm = "tps", fps_col_nm = "fps")
+  
+})
+
+# names(precision_loc) <- locations
+precision_loc
+
+# Sensitivity across locations
+sensitivity_loc <- sapply(1:length(locations), function(i){
+  
+  sensitivity(X = tp_fp_tn_fn_sum[grep(locations[i], tp_fp_tn_fn_sum$location), ], tps_col_nm = "tps", fns_col_nm = "fns")
+  
+})
+
+sensitivity_loc
+
+# Specificity across locations
+specificity_loc <- sapply(1:length(locations), function(i){
+  
+  specificity(X = tp_fp_tn_fn_sum[grep(locations[i], tp_fp_tn_fn_sum$location), ], tns_col_nm = "tps", fps_col_nm = "fns")
+  
+})
+
+specificity_loc
+
+# Note that sensitivity and specificity are the same, given the way that false positives and negatives were defined
+
+data.frame(
+  locations = locations,
+  precision = precision_loc,
+  sensitivity = sensitivity_loc,
+  specificity = specificity_loc
+)
+
+#            locations precision sensitivity specificity
+# 1 container_entrance      87.5       50.00       50.00
+# 2   inside_container     100.0       88.00       88.00
+# 3               both      50.0        7.14        7.14
+
+```

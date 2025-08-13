@@ -1,0 +1,467 @@
+---
+title: "Video validation analysis setup"
+author: "Grace Smith-Vidaurre"
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+output: html_document
+---
+
+*Purpose*: Perform validation analyses of the coarse-grained behavioral inferences that can be obtained by ABISSMAL. Across these validation analyses, we selected a single set of parameters used in computational analyses available through ABISSMAL to integrate data across movement sensors, and used that dataset to represent automatically scored behavioral inferences. We used the subsample of video recording events in which behavioral states that were manually scored by a single observer for adult birds and juveniles as a baseline dataset for the following validation analyses. These validation analyses included:
+
+1. *Overall activity detection*
+
+2. *Location of activity*
+
+3. *RFID detection error rates*
+
+4. *Individual identity detection*
+
+5. *Coarse-grained behavioral inferences*
+
+Summer noticed some video recording events had videos switched in order, so we have to pre-process the manually scored dataset to fix these issues for the videos she caught that had this issue.
+
+Finally, the validation analysis will be planned out and run with a random subsample of the videos used for this analysis.
+
+TKTK check true and false negative calculations throughout.
+
+```{r setup, include = FALSE}
+
+knitr::opts_chunk$set(echo = TRUE, eval = TRUE, warning = FALSE, messsage = FALSE)
+
+```
+
+Load packages and set paths.
+```{r package and paths}
+
+# Clean the global environment
+rm(list = ls())
+
+X <- c("tidyverse", "pbapply", "data.table", "tidyquant")
+
+# Install the packages in X if not already installed
+is_installed <- function(p) is.element(p, installed.packages()[,1])
+
+invisible(lapply(1:length(X), function(x){
+  if(!is_installed(X[x])){
+    install.packages(X[x], repos = "http://lib.stat.cmu.edu/R/CRAN")
+  }
+}))
+
+invisible(lapply(X, library, character.only = TRUE))
+
+# Load the custom functions for computational analyses with ABISSMAL
+code_path <- "~/Desktop/GitHub_repos/ABISSMAL/R"
+code <- list.files(code_path, pattern = ".R$", full.names = TRUE)
+
+invisible(lapply(1:length(code), function(i){
+  source(code[i])
+}))
+
+# Overall path: contains the aggregated BORIS spreadsheet in wide format across all video recording events
+path <- "~/Desktop/ABISSMAL_validation_data"
+
+# Path to the combined raw movement sensor data
+sensor_path <- file.path(path, "raw_combined")
+
+# Initialize a folder where we will save the indexed raw data for the validation analyses
+indexed_dir <- "indexed_labeled_data"
+indexed_path <- file.path(path, indexed_dir)
+
+# Create this folder if it doesn't already exist
+if(!dir.exists(indexed_path)){
+  dir.create(indexed_path)
+}
+
+# Initialize the GitHub repo path, which holds a .csv file of a subsample of video file names used for code development
+git_path <- "~/Desktop/GitHub_repos/ABISSMAL-methods-paper/Code"
+
+seed <- 888
+
+```
+
+Source functions for calculating traditional performance metrics (precision, sensitivity, and specificity).
+```{r}
+
+source(file.path(git_path, "Validation", "utilities.R"))
+
+```
+
+Read in the aggregated manual scoring spreadsheet in which each row is a unique behavioral state per subject within a recording event.
+```{r}
+
+manual_scoring <- read.csv(file.path(path, "BORIS_ManualScoring_Aggregated_pre-processed.csv"))
+glimpse(manual_scoring)
+
+```
+
+Read in the spreadsheet for unmasking the video file names.
+```{r}
+
+unmask_nms <- read.csv(file.path(path, "unmasked_video_names.csv"))
+glimpse(unmask_nms)
+
+```
+
+Next steps:
+
+1a. Data pre-processing of the switched recording events that Summer identified. Look at the spreadsheet called "BORIS_VideoList_TimeFlipped.csv". We could i) exclude these videos from analyses, or ii) we could try to flip the manual scores given the timestamps of the scores and the videos themselves, or iii) if one video has extremely short duration, then drop the scores for that video in the pair. TKTK keep thinking about a solution
+
+1b. Figure out if we can discriminate videos for which video recording was initialized by daily animal checks (a hand opening the nest container), check the notes column of the aggregated .csv. This will be scored as no birds inside of the containr but may have a very high pixel number that changed. Summer kept track in her log, but this only happened 2-3 times, check the notes of the BORIS .csv, recording event 2322 
+
+2. We need to choose a subsample of these videos to develop the validation analysis pipeline.
+
+```{r}
+
+# Randomly select 50 video recording events from the current version of the aggregated manual scoring results in wide format
+
+# First get all of the unique BORIS Observation IDs that correspond to unique recording events
+unique_obs_ids <- unique(manual_scoring$Observation.id)
+head(unique_obs_ids)
+
+# There should be 4045 Observation IDs to match the unique recording events that Summer scored, looks good
+length(unique_obs_ids)
+
+set.seed(seed)
+subsample <- sample(unique_obs_ids, 50, replace = FALSE)
+
+subsample
+
+subsample %>% 
+  write.csv(file.path(git_path, "Validation", "randomSample_BORIS_Observations_codeDevelopment.csv"), row.names = FALSE)
+
+```
+
+Read in the subsample of videos for code development.
+```{r}
+
+subsample <- read.csv(file.path(git_path, "Validation", "randomSample_BORIS_Observations_codeDevelopment.csv")) %>% 
+  pull(x)
+
+glimpse(subsample)
+
+```
+
+3. Start writing out the steps of the validation analysis, run these with the subsample of videos chosen above
+
+Pseudocode for the analysis:
+
+i) Data Processing:
+
+- Get the manual scoring data from BORIS in aggregated format (done)
+
+- Decide how to handle the time-flipped videos (in progress)
+
+- Unmask the video file names used for manual scoring
+
+```{r}
+
+manual_scoring_ss <- manual_scoring %>% 
+  dplyr::filter(Observation.id %in% subsample)
+
+glimpse(manual_scoring_ss)
+dim(manual_scoring_ss)
+
+# Checking filtering, looks good
+# all(unique(manual_scoring_ss$Observation.id) %in% subsample)
+# all(subsample %in% unique(manual_scoring_ss$Observation.id))
+
+# Add the unmasked video file names to each observation in the manual scoring spreadsheet
+# i <- 1 # testing
+manual_scoring_nm <- data.table::rbindlist(pblapply(1:nrow(manual_scoring_ss), function(i){
+  
+  # Get the masked video recording event ID
+  masked_nm <- manual_scoring_ss$masked_video_recording_event_ID[i]
+  # masked_nm
+  
+  # Use the masked video recording event ID to find the unmasked recording event ID per row
+  unmasked_nm <- unmask_nms %>% 
+    dplyr::filter(masked_name == masked_nm) %>% 
+    pull(videos)
+  
+  # Add the unmasked name back to the manual scoring data frame
+  # The unmasked name will be one of the two unique video files per unique recording event (we don't need both names for later steps)
+  return(
+    manual_scoring_ss[i, ] %>% 
+      dplyr::mutate(
+        unmasked_video_file = unmasked_nm
+      )
+  )
+  
+}))
+
+# Select a few rows at random and manually check the unmasking results
+glimpse(manual_scoring_nm)
+dim(manual_scoring_nm)
+# View(manual_scoring_nm)
+
+```
+
+Get the raw data across movement sensors used for analyses in the current methods manuscript.
+```{r}
+
+# The movement sensor data that we are using here is the raw data that we have used in the methods manuscript, and it's already been combined across days of data collection using ABISSMAL functions. We have one spreadsheet per sensor type, and the beam breaker spreadsheet contains data for 2 pairs of beam breakers
+list.files(sensor_path)
+
+# We will use this data to index the raw movement sensor data by the timestamps of the videos that Summer scored. The spreadsheet for the video recording events contains timestamp columns that correspond to the time at which the video camera detected motion and began recording the post-movement video (this timestamp is also in the filenames of each of the videos per unique recording event).
+video_events <- read.csv(file.path(sensor_path, "combined_raw_data_Video.csv")) %>% # Make sure that the timestamps are in the right format
+  dplyr::mutate(
+    timestamp_ms = as.POSIXct(format(as.POSIXct(timestamp_ms, tz = ""), "%Y-%m-%d %H:%M:%OS6")))
+
+glimpse(video_events)
+
+# View(video_events)
+
+# In the BORIS manual scoring data, we can use the column of Media File Duration to extract the exact duration of each video in each unique recording event (lots of variability in the duration of the pre-movement video recorded using the ring buffer)
+
+```
+
+Use the unmasked video file names to get the start timestamp of the post-movement video in each unique recording event in the spreadsheet of video recording events recorded by ABISSMAL. In this metadata spreadsheet for the video recordings he column timestamp_ms that holds the time when the camera detected motion and started recording video. Use these timestamps along with the durations of the pre- and post-movement videos from the aggregated BORIS manual scoring spreadsheet to obtain the start and end timestamps of each unique recording event (the pre- and post-movement videos together).
+```{r}
+
+# Get the unique prefixes for unmasked video recording event names
+unique_video_pats <- manual_scoring_nm %>% 
+  pull(unmasked_video_file) %>% 
+  gsub("pre_trigger.mp4|_post_trigger.mp4", "", .) %>% 
+  unique()
+
+unique_video_pats
+
+# Filter the video recording event metdata spreadsheet to obtain the start timestamps for the post-movement video per unique recording event
+# i <- 1
+recording_event_ts <- data.table::rbindlist(pblapply(1:length(unique_video_pats), function(i){
+  
+  # Get the start timestamp for the post-movement video of the current unique recording event
+  start_post <- video_events %>% 
+    dplyr::filter(grepl(unique_video_pats[i], video_file_name)) %>% 
+    pull(timestamp_ms) %>% 
+    unique()
+  
+  # Get the duration of each video file in the given recording event
+  tmp <- manual_scoring_nm %>% 
+    dplyr::filter(grepl(unique_video_pats[i], unmasked_video_file)) %>% 
+    separate(
+      ., col = "Media.duration..s.", into = c("video_1_dur", "video_2_dur"), sep = ";", remove = FALSE
+    ) %>% 
+    dplyr::select(c("video_1_dur", "video_2_dur")) %>% 
+    distinct() %>%
+    # Convert the duration in seconds to numeric
+    dplyr::mutate(
+      video_1_dur = as.numeric(video_1_dur),
+      video_2_dur = as.numeric(video_2_dur)
+    )
+  
+  # Create the start timestamp for this unique recording event by subtracting the duration of the first video in this event from the timestamp of the post-motion video
+  start_event <- start_post - tmp$video_1_dur
+  # start_event
+  
+  # Create the end timestamp for this unique recording event by adding the duration of the second video to the start timestamp of the post-motion video
+  end_event <- start_post + tmp$video_2_dur
+  # end_event
+  
+  # Check that the duration of these timestamps yields the same duration as the sum of the media durations in the BORIS spreadsheet
+  offset <- as.numeric(end_event - start_event) - (tmp$video_1_dur + tmp$video_2_dur)
+  
+  if(offset < 0.01){
+    
+    return(
+      data.frame(
+        unique_recording_event_ID = unique_video_pats[i],
+        start_event = start_event,
+        end_event = end_event
+      )
+    )
+    
+  } else {
+    
+    stop("The video durations do not line up")
+    
+  }
+  
+}))
+
+# We can use the timestamps to index the raw detections for all other movement sensors for validation
+glimpse(recording_event_ts)
+# View(recording_event_ts)
+
+# The same number of rows should be here compared to the number of videos in the subsample
+nrow(recording_event_ts) == length(subsample)
+
+```
+
+Read in the combined raw data for each sensor type.
+```{r}
+
+# Read in the raw combined infrared beam breaker detections
+irbb_events <- read.csv(file.path(sensor_path, "combined_raw_data_IRBB.csv")) %>% # Make sure that the timestamps are in the right format
+  dplyr::mutate(
+    timestamp_ms = as.POSIXct(format(as.POSIXct(timestamp_ms, tz = ""), "%Y-%m-%d %H:%M:%OS6")))
+
+glimpse(irbb_events)
+
+# Read in the raw combined RFID detections
+rfid_events <- read.csv(file.path(sensor_path, "combined_raw_data_RFID.csv")) %>% # Make sure that the timestamps are in the right format
+  dplyr::mutate(
+    timestamp_ms = as.POSIXct(format(as.POSIXct(timestamp_ms, tz = ""), "%Y-%m-%d %H:%M:%OS6")))
+
+glimpse(rfid_events)
+
+# Read in the raw combined video detections
+video_events <- read.csv(file.path(sensor_path, "combined_raw_data_Video.csv")) %>% # Make sure that the timestamps are in the right format
+  dplyr::mutate(
+    timestamp_ms = as.POSIXct(format(as.POSIXct(timestamp_ms, tz = ""), "%Y-%m-%d %H:%M:%OS6")))
+
+glimpse(video_events)
+
+```
+
+The next step will be to perform automated behavioral scoring of the raw movement sensor data using the default temporal thresholds for automated data processing and behavioral inference from ABISSMAL computational analyses.
+
+# Perching events
+
+Find RFID and beam breaker perching events. Iterate over different temporal thresholds used to label stretches of detections as perching events.
+```{r find perching events}
+
+# Setting the threshold to 2 seconds only, to include detections that occurred from 0 - 2 seconds apart. No results are returned for RFID using a threshold of 1 second. I'm also using a run length of 2 to set the minimum number of detections needed to call a perching event to 3 total, which does reduce the overall number of perching events detected by both sensors.
+ths <- c(2) # temporal thresholds in seconds
+
+invisible(pblapply(1:length(ths), function(thx){
+  
+  detect_perching_events(file_nm = "combined_raw_data_RFID.csv", threshold = ths[thx], run_length = 2, sensor_id_col_nm = "sensor_id", timestamps_col_nm = "timestamp_ms", PIT_tag_col_nm = "PIT_tag_ID", rfid_label = "RFID", outer_irbb_label = NULL, inner_irbb_label = NULL, general_metadata_cols = c("chamber_id", "sensor_id"), path = path, data_dir = "raw_combined", out_dir = "processed", out_file_prefix = paste("perching_events_th-", ths[thx], sep = ""), tz = "", POSIXct_format = "%Y-%m-%d %H:%M:%OS")
+  
+}))
+
+invisible(pblapply(1:length(ths), function(thx){
+  
+  detect_perching_events(file_nm = "combined_raw_data_IRBB.csv", threshold = ths[thx], run_length = 2, sensor_id_col_nm = "sensor_id", timestamps_col_nm = "timestamp_ms", PIT_tag_col_nm = NULL, rfid_label = NULL, outer_irbb_label = "Outer Beam Breaker", inner_irbb_label = "Inner Beam Breaker", general_metadata_cols = c("chamber_id", "sensor_id"), path = path, data_dir = "raw_combined", out_dir = "processed", out_file_prefix = paste("perching_events_th-", ths[thx], sep = ""), tz = "", POSIXct_format = "%Y-%m-%d %H:%M:%OS")
+  
+}))
+
+```
+
+TKTK checking perching events.
+```{r}
+
+perching_df <- read.csv(file.path(path, "processed", "perching_events_th-2_RFID.csv"))
+glimpse(perching_df)
+
+perching_df <- read.csv(file.path(path, "processed", "perching_events_th-2_IRBB.csv"))
+glimpse(perching_df)
+
+# Check gap summary statistics before moving on. Looks good for both sensor types
+perching_df %>%
+  pivot_longer(
+    cols = c("min_gap_s", "mean_gap_s", "max_gap_s"),
+    names_to = "type",
+    values_to = "values"
+  ) %>% 
+  # group_by(PIT_tag_ID) %>% 
+  dplyr::reframe(
+    range_vals = range(values)
+  )
+
+```
+
+# Pre-processing raw data
+
+Pre-process the RFID, beam breaker, and video data for the indexed detections per sensor. Iterate over different temporal thresholds used to remove beam breaker and RFID detections that were very close together.
+
+TKTK update code, need to either update the function below to include a prefix, or instead run all functions together per temporal threshold and save these in separate directories by threshold value.
+```{r preprocess data}
+
+# Using a threshold of 1 second only here
+ths <- c(1) # temporal thresholds in seconds
+
+invisible(pblapply(1:length(ths), function(thx){
+  
+  # Used thinning with a threshold of 2 seconds for beam breakers as well
+  preprocess_detections(sensor = "IRBB", timestamps_col_nm = "timestamp_ms", group_col_nm = "sensor_id", pixel_col_nm = NULL, mode = "thin", thin_threshold = 2, pixel_threshold = NULL, drop_tag = NULL, path = path, data_dir = "raw_combined", out_dir = "processed", tz = "", POSIXct_format = "%Y-%m-%d %H:%M:%OS")
+  
+}))
+
+# Performed pre-processing with a threshold of 2 seconds for RFID because I removed the timestamp difference rounding
+# The PIT tag IDs specified in `drop_tag` were tags I used for testing the RFID antenna and were not used to mark birds
+invisible(pblapply(1:length(ths), function(thx){
+  
+  preprocess_detections(sensor = "RFID", timestamps_col_nm = "timestamp_ms", group_col_nm = "PIT_tag_ID", pixel_col_nm = NULL, mode = "thin", thin_threshold = 2, pixel_threshold = NULL, drop_tag = c("01-10-3F-84-FC", "01-10-16-B8-7F"), path = path, data_dir = "raw_combined", out_dir = "processed", tz = "", POSIXct_format = "%Y-%m-%d %H:%M:%OS")
+  
+}))
+
+# Used a pixel threshold of 1000 for video data. Since we used 9000 pixels as the sensitivity threshold for motion detection, this filtering threshold will not drop any data
+# This filtering should not drop any videos in the indexed data, and looks good, 100 rows remain
+preprocess_detections(sensor = "Video", timestamps_col_nm = "timestamp_ms", group_col_nm = NULL, pixel_col_nm = "total_pixels_motionTrigger", mode = NULL, thin_threshold = NULL, pixel_threshold = 1000, drop_tag = NULL, path = path, data_dir = "raw_combined", out_dir = "processed", tz = "", POSIXct_format = "%Y-%m-%d %H:%M:%OS")
+
+```
+
+# Integrate pre-processed data
+
+Find clusters of detections across all 3 movement sensor that represent movement events per.
+```{r find detection clusters for 3 sensor types}
+
+# Using camera_label = "Camera" again here since that's was carried through from the raw data
+# The run length needs to be set to 1 in order to correctly detect detection clusters of length 2
+detect_clusters(file_nms = c("pre_processed_data_IRBB.csv", "pre_processed_data_RFID.csv", "pre_processed_data_Video.csv"), threshold = 2, run_length = 1, sensor_id_col_nm = "sensor_id", timestamps_col_nm = "timestamp_ms", PIT_tag_col_nm = "PIT_tag_ID", rfid_label = "RFID", camera_label = "Camera", preproc_metadata_col_nms = c("thin_threshold_s", "pixel_threshold", "data_stage", "date_pre_processed"), general_metadata_col_nms = c("chamber_id", "year", "month", "day"), video_metadata_col_nms = c("total_pixels_motionTrigger", "video_file_name"), path = path, data_dir = "processed", out_dir = "processed", out_file_nm = "detection_clusters.csv", tz = "", POSIXct_format = "%Y-%m-%d %H:%M:%OS")
+
+# Check summary statistics for gaps between consecutive detections
+detectn_clusters <- read.csv(file.path(path, "processed", "detection_clusters.csv"))
+glimpse(detectn_clusters)
+
+# The maximum gap between consecutive detections should be 2 seconds, looks good
+detectn_clusters %>% 
+  pivot_longer(
+    cols = c("min_gap_s", "mean_gap_s", "max_gap_s"),
+    names_to = "type",
+    values_to = "values"
+  ) %>% 
+  # group_by(PIT_tag_ID) %>% 
+  dplyr::reframe(
+    range_vals = range(values)
+  )
+
+```
+
+Score detection clusters to make inferences about behavioral events associated with these movements.  `score_clusters` should be making inferences by just the first edge encountered, not all edges in a sequence, because the system is currently targeted to capturing overall patterns of activity.
+```{r score detection clusters for 3 sensor types}
+
+score_clusters(file_nm = "detection_clusters.csv", rfid_label = "RFID", camera_label = "Camera", outer_irbb_label = "Outer Beam Breaker", inner_irbb_label = "Inner Beam Breaker", video_metadata_col_nms = c("total_pixels_motionTrigger", "video_file_name"), integrate_perching = TRUE, perching_dataset = "RFID-IRBB", perching_prefix = "perching_events_th-2_", perching_threshold = 2, sensor_id_col_nm = "sensor_id", PIT_tag_col_nm = "PIT_tag_ID", pixel_col_nm = "total_pixels_motionTrigger", video_width = 1280, video_height = 720, integrate_preproc_video = TRUE, video_file_nm = "pre_processed_data_Video.csv", timestamps_col_nm = "timestamp_ms", path = path, data_dir = "processed", out_dir = "processed", out_file_nm = "scored_detectionClusters.csv", tz = "", POSIXct_format = "%Y-%m-%d %H:%M:%OS")
+
+```
+
+# Index the automatatically scored data by the buffered timestamps of the manually scored videos
+
+Index the raw data per movement sensor type by the start and end timestamps of all of the videos used for manual scoring for validation.
+```{r}
+
+# Iterate over rows in the video recording event timestamps to pull out raw data from each of the movement sensor types (including the videos themselves), using a buffer of 2 seconds before and after the start and end timestamps of each unique video recording event
+
+scored_clusters <- read.csv(file.path(path, "processed", "scored_detectionClusters.csv"))  %>% 
+  # Make sure that the timestamps are in the right format
+  dplyr::mutate(
+    start = as.POSIXct(format(as.POSIXct(start, tz = ""), "%Y-%m-%d %H:%M:%OS6")),
+    end = as.POSIXct(format(as.POSIXct(end, tz = ""), "%Y-%m-%d %H:%M:%OS6"))
+  )
+
+glimpse(scored_clusters)
+
+# Initialize the temporal buffer for indexing (seconds)
+buf <- 2
+
+# Testing
+# i <- 1
+
+indexed_scores <- invisible(data.table::rbindlist(lapply(1:nrow(recording_event_ts), function(i){
+  
+  tmp <- scored_clusters %>% 
+    dplyr::filter(
+      start >= recording_event_ts$start_event[i] - buf & 
+        end <= recording_event_ts$end_event[i] + buf
+    )
+  
+  return(tmp)
+  
+})))
+
+glimpse(indexed_scores)
+
+indexed_scores %>%
+  write.csv(file.path(indexed_path, "indexed_scored_clusters.csv"), row.names = FALSE)
+
+```

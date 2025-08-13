@@ -1,0 +1,413 @@
+---
+title: "Video validation analysis 1: Overall activity levels"
+author: "Grace Smith-Vidaurre"
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+output: html_document
+---
+
+*Purpose of overall activity detection validation*: First, how well does the integration of 3 movement sensors capture whether birds are inside of the container or not? Can we generally use the automated scores to infer that sensor activity was due to the birds or not? For this analysis, perform integration of data from the 3 sensors for all days of data collection, and then index the scored activities using the timestamps of the manually scored video recording events with a time buffer around them.
+
+```{r setup, include = FALSE}
+
+knitr::opts_chunk$set(echo = TRUE, eval = TRUE, warning = FALSE, messsage = FALSE)
+
+```
+
+Load packages and set paths.
+```{r package and paths}
+
+# Clean the global environment
+rm(list = ls())
+
+X <- c("tidyverse", "pbapply", "data.table", "tidyquant")
+
+# Install the packages in X if not already installed
+is_installed <- function(p) is.element(p, installed.packages()[,1])
+
+invisible(lapply(1:length(X), function(x){
+  if(!is_installed(X[x])){
+    install.packages(X[x], repos = "http://lib.stat.cmu.edu/R/CRAN")
+  }
+}))
+
+invisible(lapply(X, library, character.only = TRUE))
+
+# Overall path: contains the aggregated BORIS spreadsheet in wide format across all video recording events
+path <- "~/Desktop/ABISSMAL_validation_data"
+
+# Path to the combined raw movement sensor data
+sensor_path <- file.path(path, "raw_combined")
+
+# Initialize a folder where we will save the indexed raw data for the validation analyses
+indexed_dir <- "indexed_labeled_data"
+indexed_path <- file.path(path, indexed_dir)
+
+# Create this folder if it doesn't already exist
+if(!dir.exists(indexed_path)){
+  dir.create(indexed_path)
+}
+
+# Initialize the GitHub repo path, which holds a .csv file of a subsample of video file names used for code development
+git_path <- "~/Desktop/GitHub_repos/ABISSMAL-methods-paper/Code"
+
+seed <- 888
+
+```
+
+Next, we need to check that the automated and manual datasets are in similar format in order to make a 1:1 plot for the very first validation figure.
+```{r}
+
+auto_scoring <- read.csv(file.path(indexed_path, "indexed_scored_clusters.csv")) %>%
+  # Make sure that the timestamps are in the right format
+  dplyr::mutate(
+    start = as.POSIXct(format(as.POSIXct(start, tz = ""), "%Y-%m-%d %H:%M:%OS6")),
+    end = as.POSIXct(format(as.POSIXct(end, tz = ""), "%Y-%m-%d %H:%M:%OS6"))
+  )
+
+# Check out the automated inferences and the manual scoring results (filtered by the subsample of videos used to develop this code, and unmasked)
+# glimpse(auto_scoring)
+# glimpse(manual_scoring_nm)
+
+# View(auto_scoring)
+# View(manual_scoring_nm)
+
+# These columns contain the name of the video file associated with each event that was scored. The automated inferences will have NAs in this column when a video recording event was not associated with the given event
+# auto_scoring$video_file_name
+# manual_scoring_nm$unmasked_video_file
+
+# The manual scoring protocol was oriented to score several behavioral states (and per subject) across each video recording event, while the automated scoring can identify multiple behavioral events associated with each video recording event, but is less likely to identify as many as the manual scoring given that we have more limited individual resolution (RFID at the container entrance only, and this can fail to detect PIT tags). In the automated inferences, are there cases when a single video recording event was used for more than one behavioral score?
+
+# Yes, although in this subsample of the data there is only 1 video recording event that meets this condition
+# length(auto_scoring$video_file_name[!is.na(auto_scoring$video_file_name)])
+# length(unique(auto_scoring$video_file_name[!is.na(auto_scoring$video_file_name)]))
+# which(duplicated(auto_scoring$video_file_name[!is.na(auto_scoring$video_file_name)]))
+# auto_scoring$video_file_name[!is.na(auto_scoring$video_file_name)][3]
+# Box_03_2023_7_22_13_24_42_pre_trigger.mp4
+
+# auto_scoring %>% 
+# dplyr::filter(video_file_name == "Box_03_2023_7_22_13_24_42_pre_trigger.mp4") %>% 
+# View()
+
+# How many automated scores have no associated video?
+# Two rows
+auto_scoring %>% 
+  dplyr::filter(is.na(video_file_name)) %>% 
+  nrow()
+
+# Iterate over rows in the automated scores, and for scored events not associated with videos, figure out whether those timestamps align with the start and end of a unique recording event with the added time buffer on either end
+auto_scoring_extraAssignedVids <- data.table::rbindlist(lapply(1:nrow(auto_scoring), function(i){
+  
+  # cat(paste("i = ", i, "\n", sep = " "))
+  
+  tmp_auto <- auto_scoring %>% 
+    slice(i)
+  
+  if(is.na(tmp_auto$video_file_name)){
+    
+    # This filter will only find matches when the non-video sensor event started before the video recording
+    tmp <- recording_event_ts %>% 
+      # Filter using the start time, and bound the end timestamp to fall within 18 seconds after the start (to account for recording events composed of a video of ~6 seconds, then a video of ~ 10 seconds, sometimes up to 18 seconds together)
+      dplyr::filter(
+        start_event >= tmp_auto$start & end_event <= (tmp_auto$start + 18)
+      )
+    
+    # Perform a search for events that occurred in the middle of a video recording if the search above didn't return results
+    if(nrow(tmp) == 0){
+      
+      tmp <- recording_event_ts %>%
+        # This filter will only find matches when the non-video sensor event started after the video recording
+        dplyr::filter(
+          tmp_auto$start >= start_event & tmp_auto$start <= end_event
+        )
+      
+    }
+    
+    if(nrow(tmp) > 0){
+      
+      # Return the current row with the video recording event assigned as above
+      res <- tmp_auto %>% 
+        dplyr::mutate(
+          # Add the _pre-trigger suffix to match how videos within a video recording event pair were assigned during ABISSMAL automated analysis
+          assigned_recording_event = paste(tmp$unique_recording_event_ID, "pre_trigger.mp4", sep = "")
+        )
+      
+    } else {
+      
+      # Return the current row with the video recording event assigned as missing
+      res <- tmp_auto %>% 
+        dplyr::mutate(
+          assigned_recording_event = NA
+        )
+      
+    }
+    
+  } else {
+    
+    res <- tmp_auto %>% 
+      dplyr::mutate(
+        assigned_recording_event = video_file_name
+      )
+    
+  }
+  
+  return(res)
+  
+}))
+
+
+glimpse(auto_scoring_extraAssignedVids)
+
+# All values that are missing the suffix "pre-trigger" or "post-trigger" were assigned in the loop above
+unique(auto_scoring_extraAssignedVids$assigned_recording_event)
+
+checking <- paste(recording_event_ts$unique_recording_event_ID, "pre_trigger.mp4", sep = "")
+
+# Currently there are not more videos assigned to the automated detections than there are in the subsample of manually scored videos, looks good
+auto_scoring_extraAssignedVids$assigned_recording_event[!grepl(paste(checking, collapse = "|"), auto_scoring_extraAssignedVids$assigned_recording_event)]
+
+# Then we need to summarize the automated and manually scored data to yield a single row per video recording event, in order to make a 1:1 plot. In this plot, there should be more behavioral states scored manually than using the automated inferences (see my rationale above)
+auto_scoring_summ <- auto_scoring_extraAssignedVids %>%
+  # Drop rows that did not have an associated video recording event
+  dplyr::filter(!is.na(video_file_name)) %>% 
+  group_by(video_file_name) %>% 
+  dplyr::summarise(
+    n_events = n()
+  )
+
+manual_scoring_nm_summ <- manual_scoring_nm %>% 
+  group_by(unmasked_video_file) %>% 
+  dplyr::summarise(
+    n_events = n()
+  )
+
+glimpse(auto_scoring_summ)
+glimpse(manual_scoring_nm_summ)
+
+# Merge this data together and make a plot
+gg_res <- auto_scoring_summ %>% 
+  dplyr::mutate(
+    type = "automated_inference"
+  ) %>% 
+  bind_rows(
+    manual_scoring_nm_summ %>%
+      dplyr::rename(
+        `video_file_name` = "unmasked_video_file"
+      ) %>% 
+      dplyr::mutate(
+        type = "manual_scoring"
+      )
+  )
+
+# This result makes sense given the coarser-grained temporal resolution of the automated scoring 
+gg_res %>% 
+  pivot_wider(id_cols = video_file_name, names_from = type, values_from = "n_events") %>%
+  dplyr::arrange(automated_inference, manual_scoring) %>% 
+  ggplot(aes(x = manual_scoring, y = automated_inference)) +
+  geom_point() +
+  geom_jitter(width = 0.25, height = 0.25) +
+  geom_abline(slope = 1, linetype = "dotted") +
+  scale_y_continuous(limits = c(0, max(gg_res$n_events)), breaks = seq(0, max(gg_res$n_events), 1)) +
+  scale_x_continuous(limits = c(0, max(gg_res$n_events)), breaks = seq(0, max(gg_res$n_events), 1)) +
+  xlab("Behavioral events obtained by manual scoring") +
+  ylab("Behavioral events obtained by automated inference") +
+  theme_bw() +
+  theme(
+    panel.grid.minor = element_blank()
+  )
+
+
+```
+
+Next steps:
+
+- Start validation analyses at a very coarse-grained scale with the manual scoring as a baseline:
+
+1. OVERALL ACTIVITY DETECTION: First, how well does the integration of 3 movement sensors capture whether birds are inside of the container or not? Can we generally use the automated scores to infer that sensor activity was due to the birds or not? For this analysis, perform integration of data from the 3 sensors for all days of data collection, and then index the scored activities using the timestamps of the manually scored video recording events with a time buffer around them. 
+
+General approach to calculating detection performance:
+
+For the binary analysis below, we want to know how often ABISSMAL and manual scoring picked up activity versus no activity, regardless of the behavior itself, the individual, or the location (container entrance or inside of the container). Throughout this analysis, keep in mind that the manually scored dataset relies on videos recorded by motion detection through ABISSMAL, and therefore we do not have access to a manually scored dataset of continuous video recordings, which would let us address whether activity occurred or not outside of the timestamps of the ABISSMAL automated scores. Later validation work to truly assess the metrics below will require manual scoring of continuous video recordings, accompanied by automated scoring through ABISSMAL (including a separate stream of motion-detection video recordings).
+
+**True positive** = activity was detected by both ABISSMAL and manual scoring. How often did ABISSMAL capture activity when activity was also picked up by manual scoring (any of PERC, ENTR, EXIT, INSC captured by both methods)?
+
+**False negative** = ABISSMAL does not detect activity, but manual scoring detected activity. Currently we cannot assess true negatives for this analysis because the current version of the ABISSMAL functions only infer activity, not the lack of activity.
+
+**False positive** = ABISSMAL detects activity, but manual scoring detected a lack of activity. How often did manual scoring find no birds inside of the container for the duration of the video recording event (NOBR) but ABISSMAL detected activity (any of PERC, ENTR, EXIT, INSC)?
+
+**True negative** = neither ABISSMAL nor manual scoring detect activity. We cannot calculate true negatives for the same reasons as above with false negatives.
+
+Overall, we can assess the rate of true positives and the rate of false positives, which facilitates calculating the precision. This metric represents the percentage of the automatically inferred activity labels that were truly positive (e.g. that corresponded to activity scored by a human observer): 
+
+true positives / (true positives + false positives)
+
+```{r}
+
+# First we need to condense the behavioral inferences from automated scoring into a single column
+auto_scoring2 <- auto_scoring_extraAssignedVids %>%
+  dplyr::mutate(
+    perching_inference = ifelse(!is.na(perching_rfid_start) | !is.na(perching_outer_irbb_start) | !is.na(perching_inner_irbb_start), "perching", NA)) %>% 
+  dplyr::mutate(
+    inferences = paste(direction_scored, inferredMovement_Location, perching_inference, sep = "-")
+  )
+
+glimpse(auto_scoring2)
+
+table(auto_scoring2$inferences)
+
+# no perching events represented here with this video subsample:
+
+# entrance-container_entrance-NA      ### this is an entrance or ENTR
+#                              6 
+# exit-container_entrance-NA          ### this is an exit or EXIT
+#                              3 
+# NA-inside_container-NA              ### this is inside_container or INSC
+#                             44 
+
+# Will need to add back perching events for the full dataset (currently that inference is NA here). TKTK see code above, perching events were added already above
+auto_scoring2 <- auto_scoring2 %>% 
+  dplyr::mutate(
+    inferences = ifelse(inferences == "entrance-container_entrance-NA", "ENTR", inferences),
+    inferences = ifelse(inferences == "exit-container_entrance-NA", "EXIT", inferences),
+    inferences = ifelse(inferences == "NA-inside_container-NA", "INSC", inferences)
+  )
+
+# Looks good
+table(auto_scoring2$inferences)
+glimpse(auto_scoring2)
+
+```
+
+Then we need to condense the automated scoring and the manual scoring data frame to have a single row per video.
+```{r}
+
+# View(manual_scoring_nm)
+names(manual_scoring_nm)
+
+# Get one row of behavioral labels per video recording event
+manual_table <- manual_scoring_nm %>% 
+  group_by(unmasked_video_file) %>%
+  # Create a unique row identifier within videos
+  dplyr::mutate(
+    row_id = row_number()
+  ) %>% 
+  ungroup() %>% 
+  # View()
+  dplyr::select(row_id, unmasked_video_file, Behavior) %>% 
+  pivot_wider(names_from = unmasked_video_file, values_from = Behavior) %>% 
+  t()
+
+auto_table <- auto_scoring2 %>% 
+  group_by(assigned_recording_event) %>%
+  # Create a unique row identifier within videos
+  dplyr::mutate(
+    row_id = row_number()
+  ) %>% 
+  ungroup() %>% 
+  # View()
+  dplyr::select(row_id, assigned_recording_event, inferences) %>% 
+  pivot_wider(names_from = assigned_recording_event, values_from = inferences) %>% 
+  t()
+
+# View(auto_scoring2)
+
+# View(auto_table)
+# View(manual_table)
+
+```
+
+**True positive** = activity was detected by both ABISSMAL and manual scoring. How often did ABISSMAL capture activity when activity was also picked up by manual scoring (any of PERC, ENTR, EXIT, INSC captured by both methods)?
+
+**False positive** = ABISSMAL detects activity, but manual scoring detected a lack of activity. How often did manual scoring find no birds inside of the container for the duration of the video recording event (NOBR) but ABISSMAL detected activity (any of PERC, ENTR, EXIT, INSC)?
+
+Then: precision = true positives / (true positives + false positives)
+
+```{r}
+
+# Looks good
+length(unique(auto_scoring2$assigned_recording_event))
+length(unique(manual_scoring_nm$unmasked_video_file))
+
+# Iterate over all the unique videos included in the automated and manual scoring tables to find true positives and false negatives
+unique_videos <- unique(manual_scoring_nm$unmasked_video_file)
+unique_videos
+
+glimpse(auto_table)
+glimpse(manual_table)
+
+activity_labels <- c("PERC", "ENTR", "EXIT", "INSC")
+no_activity_label <- "NOBR"
+
+i <- 1
+
+tp_fp <- data.table::rbindlist(pblapply(1:length(unique_videos), function(i){
+  
+  # Get unique behavioral scores for the given unique recording event from summarized tables of both scoring methods
+  auto_scores <- unique(auto_table[grep(unique_videos[i], dimnames(auto_table)[[1]]), ])
+  
+  manual_scores <- unique(manual_table[grep(unique_videos[i], dimnames(manual_table)[[1]]), ])
+  
+  # Convert scores to Boolean using the activity labels
+  auto_a <- ifelse(any(activity_labels %in% auto_scores), TRUE, FALSE)
+  manual_a <- ifelse(any(activity_labels %in% manual_scores), TRUE, FALSE)
+  
+  # Convert scores to Boolean using the no activity label
+  auto_n <- ifelse(any(no_activity_label %in% auto_scores), TRUE, FALSE)
+  manual_n <- ifelse(any(no_activity_label %in% manual_scores), TRUE, FALSE)
+  
+  # auto_a
+  # manual_a
+  # auto_n
+  # manual_n
+  
+  # Score true positives: both methods identitfied a type of activity
+  if(auto_a & manual_a){
+    
+    true_positive <- 1
+    
+  } else {
+    
+    true_positive <- 0
+    
+  }
+  
+  # Score false positives: manual scoring identified NOBR but ABISSMAL detected a type of activity
+  if(!manual_n & auto_n){
+    
+    false_positive <- 1
+    
+  } else {
+    
+    false_positive <- 0
+    
+  }
+  
+  return(
+    data.frame(
+      unique_video_recording_event = unique_videos[i],
+      true_positive = true_positive,
+      false_positive = false_positive
+    )
+  )
+  
+}))
+
+
+glimpse(tp_fp)
+
+```
+
+Calculate the precision of the overall activity detection, which for the current subsample of 50 video recording events was 100%.
+```{r}
+
+# Precision is: true positives / (true positives + false positives)
+
+tp_fp_sum <- tp_fp %>% 
+  dplyr::summarise(
+    tps = sum(true_positive),
+    fps = sum(false_positive)
+  )
+
+precision_oa <- precision(X = tp_fp_sum, tps_col_nm = "tps", fps_col_nm = "fps")
+precision_oa
+
+```
