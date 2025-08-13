@@ -54,6 +54,15 @@ seed <- 888
 
 ```
 
+Source functions for calculating traditional performance metrics (precision, sensitivity, and specificity).
+```{r}
+
+source(file.path(git_path, "Validation", "utilities.R"))
+
+```
+
+TKTK need manual_scoring_nm too, and potentially other objects
+
 2. LOCATION INFERENCE: Next, focus on asking whether the automated and manual scores label activity by birds at the container entrance and/or inside of the container. The options here are: container entrance, inside or container, or both. For this analysis, we will use any activity score between the two methods (any of PERC, ENTR, EXIT, INSC), but ask whether the two methods agree in the location of activity. We will also focus only on manual scores of activity, and drop manual scores of no activity (NOBR).
 
 Generall approach to calculating detection performance:

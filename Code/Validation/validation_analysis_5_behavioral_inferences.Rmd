@@ -54,6 +54,15 @@ seed <- 888
 
 ```
 
+Source functions for calculating traditional performance metrics (precision, sensitivity, and specificity).
+```{r}
+
+source(file.path(git_path, "Validation", "utilities.R"))
+
+```
+
+TKTK need manual_scoring_nm too, and potentially other objects
+
 
 5. BEHAVIORAL INFERENCE: Next, ask how well the integrated dataset of movement sensors scored the TYPE of activity detected. This is a finer-grained validation to ask how well behavioral scores associated with the video recording events match between the two methods. Check out my notes above that detail expectations - there will be more scores per video recording event using the manual method. The ABISSMAL functions also are currently designed to identify discrete behavioral events in a coarse-grained way, rather than longer sequences of these dicrete events. Therefore, the analyses below focus on asking how often each type of behavior was identified per unique video recording event per method, rather than comparing sequences of behavioral scores.
 

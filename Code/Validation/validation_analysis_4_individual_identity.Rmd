@@ -54,6 +54,15 @@ seed <- 888
 
 ```
 
+Source functions for calculating traditional performance metrics (precision, sensitivity, and specificity).
+```{r}
+
+source(file.path(git_path, "Validation", "utilities.R"))
+
+```
+
+TKTK need manual_scoring_nm too, and potentially other objects
+
 4. INDIVIDUAL IDENTITY DETECTION: Next, ask how reliably we captured individual identity with RFID compared to the manually scored videos. In this analysis, we will rely on the RFID data for the automated detection of individuals, which will have data for the PIT-tagged adults only. Focus this analysis on asking how often each PIT tag was detected for each adult compared to the manual scoring, and then both PIT tags when manual scoring identified activity by both adults (three overall levels of individual identity detection performance).
 
 General approach to calculating individual identity detection performance:

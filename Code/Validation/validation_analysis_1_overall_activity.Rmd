@@ -54,6 +54,15 @@ seed <- 888
 
 ```
 
+Source functions for calculating traditional performance metrics (precision, sensitivity, and specificity).
+```{r}
+
+source(file.path(git_path, "Validation", "utilities.R"))
+
+```
+
+TKTK need manual_scoring_nm too
+
 Next, we need to check that the automated and manual datasets are in similar format in order to make a 1:1 plot for the very first validation figure.
 ```{r}
 

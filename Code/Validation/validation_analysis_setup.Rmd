@@ -17,9 +17,9 @@ output: html_document
 
 5. *Coarse-grained behavioral inferences*
 
-Summer noticed some video recording events had videos switched in order, so we have to pre-process the manually scored dataset to fix these issues for the videos she caught that had this issue.
+We planned and developed the code for validation analyses with a small random subsample of all of the videos used for this analysis.
 
-Finally, the validation analysis will be planned out and run with a random subsample of the videos used for this analysis.
+TKTK Summer noticed some video recording events had videos switched in order, so we have to pre-process the manually scored dataset to fix these issues for the videos she caught that had this issue.
 
 TKTK check true and false negative calculations throughout.
 
@@ -75,13 +75,6 @@ if(!dir.exists(indexed_path)){
 git_path <- "~/Desktop/GitHub_repos/ABISSMAL-methods-paper/Code"
 
 seed <- 888
-
-```
-
-Source functions for calculating traditional performance metrics (precision, sensitivity, and specificity).
-```{r}
-
-source(file.path(git_path, "Validation", "utilities.R"))
 
 ```
 

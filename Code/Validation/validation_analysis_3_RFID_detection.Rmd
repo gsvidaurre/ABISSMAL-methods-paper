@@ -54,6 +54,14 @@ seed <- 888
 
 ```
 
+Source functions for calculating traditional performance metrics (precision, sensitivity, and specificity).
+```{r}
+
+source(file.path(git_path, "Validation", "utilities.R"))
+
+```
+
+TKTK need manual_scoring_nm too, and potentially other objects
 
 3. RFID DETECTION: Next, ask how reliably the RFID system that ABISSMAL depends on for individual identification captured activity by the PIT-tagged adults compared to manual scoring of subjects. In this analysis, we will focus on asking how often the PIT tags of adults were detected compared to the detection of adult subjects by manual scoring. This is an important coarse-grained validation of the RFID system prior to the finer-grained individual identity validation, because there were non-PIT-tagged birds in the nest container later in development (juveniles) and also because it is common for RFID systems to fail to detect PIT tags moving through RFID antennae.
 
