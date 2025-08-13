@@ -71,6 +71,9 @@ if(!dir.exists(indexed_path)){
   dir.create(indexed_path)
 }
 
+# Initialize the GitHub repo path, which holds a .csv file of a subsample of video file names used for code development
+git_path <- "~/Desktop/GitHub_repos/ABISSMAL-methods-paper/Code"
+
 seed <- 888
 
 ```
@@ -146,6 +149,19 @@ subsample <- sample(unique_obs_ids, 50, replace = FALSE)
 
 subsample
 
+subsample %>% 
+  write.csv(file.path(git_path, "Validation", "randomSample_BORIS_Observations_codeDevelopment.csv"), row.names = FALSE)
+
+```
+
+Read in the subsample of videos for code development.
+```{r}
+
+subsample <- read.csv(file.path(git_path, "Validation", "randomSample_BORIS_Observations_codeDevelopment.csv")) %>% 
+  pull(x)
+
+glimpse(subsample)
+
 ```
 
 3. Start writing out the steps of the validation analysis, run these with the subsample of videos chosen above
@@ -165,6 +181,7 @@ i) Data Processing:
 manual_scoring_ss <- manual_scoring %>% 
   dplyr::filter(Observation.id %in% subsample)
 
+glimpse(manual_scoring_ss)
 dim(manual_scoring_ss)
 
 # Checking filtering, looks good
@@ -347,22 +364,25 @@ invisible(pblapply(1:length(ths), function(thx){
 TKTK checking perching events.
 ```{r}
 
-# Check gap summary statistics before moving on
+perching_df <- read.csv(file.path(path, "processed", "perching_events_th-2_RFID.csv"))
+glimpse(perching_df)
+
+perching_df <- read.csv(file.path(path, "processed", "perching_events_th-2_IRBB.csv"))
+glimpse(perching_df)
+
+# Check gap summary statistics before moving on. Looks good for both sensor types
 perching_df %>%
   pivot_longer(
     cols = c("min_gap_s", "mean_gap_s", "max_gap_s"),
     names_to = "type",
     values_to = "values"
   ) %>% 
-  group_by(PIT_tag_ID) %>% 
+  # group_by(PIT_tag_ID) %>% 
   dplyr::reframe(
     range_vals = range(values)
   )
 
-
 ```
-
-
 
 # Pre-processing raw data
 
@@ -419,7 +439,6 @@ detectn_clusters %>%
   dplyr::reframe(
     range_vals = range(values)
   )
-
 
 ```
 
@@ -1563,7 +1582,7 @@ sensitivity_ind <- sapply(1:length(adults), function(i){
 
 sensitivity_ind
 
-# Specificity across adultss
+# Specificity across adults
 specificity_ind <- sapply(1:length(adults), function(i){
   
   specificity(X = tp_fp_tn_fn_sum[grep(adults[i], tp_fp_tn_fn_sum$adult_labels), ], tns_col_nm = "tps", fps_col_nm = "fns")
