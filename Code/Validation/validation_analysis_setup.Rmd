@@ -19,8 +19,6 @@ output: html_document
 
 We planned and developed the code for validation analyses with a small random subsample of all of the videos used for this analysis.
 
-TKTK Summer noticed some video recording events had videos switched in order, so we have to pre-process the manually scored dataset to fix these issues for the videos she caught that had this issue.
-
 TKTK check true and false negative calculations throughout.
 
 ```{r setup, include = FALSE}
@@ -84,6 +82,13 @@ Read in the aggregated manual scoring spreadsheet in which each row is a unique 
 manual_scoring <- read.csv(file.path(path, "BORIS_ManualScoring_Aggregated_pre-processed.csv"))
 glimpse(manual_scoring)
 
+# Get all of the unique BORIS Observation IDs that correspond to unique recording events
+unique_obs_ids <- unique(manual_scoring$Observation.id)
+head(unique_obs_ids)
+
+# There should be 4045 Observation IDs to match the unique recording events that Summer scored, looks good
+length(unique_obs_ids)
+
 ```
 
 Read in the spreadsheet for unmasking the video file names.
@@ -94,24 +99,12 @@ glimpse(unmask_nms)
 
 ```
 
-Next steps:
+## Code development subsample
 
-1a. Data pre-processing of the switched recording events that Summer identified. Look at the spreadsheet called "BORIS_VideoList_TimeFlipped.csv". We could i) exclude these videos from analyses, or ii) we could try to flip the manual scores given the timestamps of the scores and the videos themselves, or iii) if one video has extremely short duration, then drop the scores for that video in the pair. TKTK keep thinking about a solution
-
-1b. Figure out if we can discriminate videos for which video recording was initialized by daily animal checks (a hand opening the nest container), check the notes column of the aggregated .csv. This will be scored as no birds inside of the containr but may have a very high pixel number that changed. Summer kept track in her log, but this only happened 2-3 times, check the notes of the BORIS .csv, recording event 2322 
-
-2. We need to choose a subsample of these videos to develop the validation analysis pipeline.
-
-```{r}
+We chose a subsample of these videos to develop the validation analysis pipeline.
+```{r eval = FALSE}
 
 # Randomly select 50 video recording events from the current version of the aggregated manual scoring results in wide format
-
-# First get all of the unique BORIS Observation IDs that correspond to unique recording events
-unique_obs_ids <- unique(manual_scoring$Observation.id)
-head(unique_obs_ids)
-
-# There should be 4045 Observation IDs to match the unique recording events that Summer scored, looks good
-length(unique_obs_ids)
 
 set.seed(seed)
 subsample <- sample(unique_obs_ids, 50, replace = FALSE)
@@ -124,7 +117,7 @@ subsample %>%
 ```
 
 Read in the subsample of videos for code development.
-```{r}
+```{r eval = FALSE}
 
 subsample <- read.csv(file.path(git_path, "Validation", "randomSample_BORIS_Observations_codeDevelopment.csv")) %>% 
   pull(x)
@@ -133,22 +126,53 @@ glimpse(subsample)
 
 ```
 
-3. Start writing out the steps of the validation analysis, run these with the subsample of videos chosen above
+## Remove flipped videos
 
-Pseudocode for the analysis:
+Summer noticed some video recording events had videos switched in order, so we have to pre-process the manually scored dataset to fix these issues for the videos she caught that had this issue. Look at the spreadsheet called "BORIS_VideoList_TimeFlipped.csv". We proceeded by excluding these videos from analyses. 
 
-i) Data Processing:
+TKTK need to check with Summer about whether the numeric IDs in the column of this spreadsheet are row indices or BORIS observation IDs. Will proceed for now as the latter.
+```{r}
 
-- Get the manual scoring data from BORIS in aggregated format (done)
+time_flipped <- read.csv(file.path(path, "BORIS_VideoList_TimeFlipped.csv"))
+glimpse(time_flipped)
 
-- Decide how to handle the time-flipped videos (in progress)
+manual_scoring2 <- manual_scoring %>% 
+  dplyr::filter(!grepl(paste(paste("_", time_flipped[["Flipped"]], "$", sep = ""), collapse = "|"), Observation.id))
 
-- Unmask the video file names used for manual scoring
+glimpse(manual_scoring2)
+
+# 33 rows deleted
+nrow(manual_scoring2) - nrow(manual_scoring) 
+
+# 15 rows here
+nrow(time_flipped)
+
+# Checking: This discrepancy is because each row of manual_scoring is not a unique video but rather a unique behavioral state per video, looks good
+manual_scoring$Observation.id[grepl(paste(paste("_", time_flipped[["Flipped"]], "$", sep = ""), collapse = "|"), manual_scoring$Observation.id)]
+
+time_flipped[["Flipped"]]
+
+```
+
+## Notes on videos recorded during daily health checks
+
+We did not remove videos for which video recording was initialized by daily animal checks (a hand opening the nest container). These videos should have been scored as no birds inside of the container, which is part of our ethogram. These videos could be filtered out for other purposes by checking for a no birds score and a large number of pixels that led to the video recording. Summer kept track in her video scoring log as well, but removing these videos was not critical for the analyses here.
+```{r}
+
+glimpse(manual_scoring2)
+
+# No useful info here about daily health checks
+unique(manual_scoring2$Comment.start)
+unique(manual_scoring2$Comment.stop)
+unique(manual_scoring2$Description)
+
+```
+
+## Unmask the video file names used for manual scoring
 
 ```{r}
 
-manual_scoring_ss <- manual_scoring %>% 
-  dplyr::filter(Observation.id %in% subsample)
+manual_scoring_ss <- manual_scoring2
 
 glimpse(manual_scoring_ss)
 dim(manual_scoring_ss)
