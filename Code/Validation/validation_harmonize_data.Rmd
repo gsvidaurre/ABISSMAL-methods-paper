@@ -5,6 +5,10 @@ date: "`r format(Sys.time(), '%d %B, %Y')`"
 output: html_document
 ---
 
+Notes on 05 Sep 2025:
+
+- Doublecheck again, but all of the code in this script should now be contained across all other scripts
+
 Notes on 23 May 2025:
 
 - Next steps from last coding session: 
